@@ -33,7 +33,8 @@ def main():
     menu.addAction("📂 Apri Video", win.open_file)
     menu.addAction("Esci", app.quit)
 
-    win.show()
+    win.resize(1400, 850)
+    win.showMaximized()
     sys.exit(app.exec_())
 
 

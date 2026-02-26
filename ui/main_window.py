@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QFileDialog, QListWidget, QListWidgetItem,
     QSlider, QGroupBox, QTabWidget, QScrollArea, QFrame, QGridLayout,
     QSpinBox, QMessageBox, QInputDialog, QColorDialog, QComboBox,
@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QButtonGroup, QMenu
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent, QSize
-from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtGui import QIcon, QFont, QColor
 from config import (
     DEFAULT_EVENT_TYPES, DRAW_COLORS, DEFAULT_CLIP_PRE_SECONDS,
     DEFAULT_CLIP_POST_SECONDS, HIGHLIGHTS_FOLDER, FREEZE_DURATION_SECONDS
@@ -26,6 +26,7 @@ from .event_buttons_config_dialog import (
 )
 from .theme import get_stylesheet, apply_palette, ACCENT
 from .drawing_overlay import DrawingOverlay, DrawTool, ArrowLineStyle
+from .draw_icons import get_draw_tool_icon
 from .opencv_video_widget import OpenCVVideoWidget
 
 
@@ -126,8 +127,6 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Football Analyzer")
-        # Dimensione iniziale compatibile con schermi 1920px (evita setGeometry error)
-        self.setGeometry(100, 50, 1400, 850)
         self.setStyleSheet(get_stylesheet())
 
         # Core
@@ -264,45 +263,48 @@ class MainWindow(QMainWindow):
         self.draw_btn_group = QButtonGroup()
         self.draw_btn_group.setExclusive(True)
         self._draw_btns = {}
-        for tool, label in [
-            (DrawTool.CIRCLE, "⭕ Cerchio"),
-            (DrawTool.ARROW, "➡️ Freccia"),
-            (DrawTool.LINE, "— Linea"),
-            (DrawTool.RECTANGLE, "▢ Rettangolo"),
-            (DrawTool.TEXT, "T Testo"),
-            (DrawTool.CONE, "🔦 Cono"),
-            (DrawTool.ZOOM, "🔍 Zoom"),
-            (DrawTool.PENCIL, "✏️ Matita"),
-            (DrawTool.CURVED_LINE, "〰️ Linea curva"),
-            (DrawTool.CURVED_ARROW, "↷ Freccia curva"),
-            (DrawTool.PARABOLA_ARROW, "🏐 Parabola"),
+        tooltips = {
+            DrawTool.CIRCLE: "Cerchio",
+            DrawTool.ARROW: "Freccia",
+            DrawTool.LINE: "Linea",
+            DrawTool.RECTANGLE: "Rettangolo",
+            DrawTool.TEXT: "Testo",
+            DrawTool.CONE: "Cono",
+            DrawTool.ZOOM: "Zoom",
+            DrawTool.PENCIL: "Matita",
+            DrawTool.CURVED_LINE: "Linea curva",
+            DrawTool.CURVED_ARROW: "Freccia curva",
+            DrawTool.PARABOLA_ARROW: "Parabola",
+            DrawTool.DASHED_ARROW: "Freccia tratteggiata",
+            DrawTool.ZIGZAG_ARROW: "Freccia zigzag",
+            DrawTool.DOUBLE_ARROW: "Freccia doppia punta",
+            DrawTool.DASHED_LINE: "Linea tratteggiata",
+        }
+        for tool in [
+            DrawTool.CIRCLE, DrawTool.ARROW, DrawTool.LINE, DrawTool.RECTANGLE,
+            DrawTool.TEXT, DrawTool.CONE, DrawTool.ZOOM, DrawTool.PENCIL,
+            DrawTool.CURVED_LINE, DrawTool.CURVED_ARROW, DrawTool.PARABOLA_ARROW,
+            DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW, DrawTool.DOUBLE_ARROW, DrawTool.DASHED_LINE,
         ]:
-            btn = QPushButton(label)
+            btn = QPushButton()
+            btn.setIcon(get_draw_tool_icon(tool.value, 18))
+            btn.setIconSize(QSize(18, 18))
+            btn.setToolTip(tooltips[tool])
+            btn.setProperty("drawToolBtn", True)
             btn.setCheckable(True)
             btn.setProperty("draw_tool", tool)
-            btn.clicked.connect(lambda c, t=tool: self._set_draw_tool(t) if c else self._set_draw_tool(DrawTool.NONE))
+            btn.clicked.connect(lambda checked, t=tool: self._set_draw_tool(t))
             self.draw_btn_group.addButton(btn)
             self._draw_btns[tool] = btn
             draw_layout.addWidget(btn)
         self._line_widths = [1, 2, 3, 4, 5, 6, 8, 10]
         self._color_btn = QPushButton("🎨 Colore / Spessore")
+        self._color_btn.setProperty("drawToolbarBtn", True)
         self._color_btn.clicked.connect(self._show_color_size_menu)
         draw_layout.addWidget(self._color_btn)
         clear_btn = QPushButton("🗑️ Cancella disegni")
         clear_btn.clicked.connect(self.drawing_overlay.clearDrawings)
         draw_layout.addWidget(clear_btn)
-        self._style_widget = QWidget()
-        style_row = QHBoxLayout(self._style_widget)
-        style_row.setContentsMargins(0, 0, 0, 0)
-        style_row.addWidget(QLabel("Stile:"))
-        self.style_combo = QComboBox()
-        for st in ArrowLineStyle:
-            self.style_combo.addItem(st.value, st)
-        self.style_combo.setCurrentIndex(0)
-        self.style_combo.currentIndexChanged.connect(self._on_arrow_line_style_changed)
-        style_row.addWidget(self.style_combo)
-        self._style_widget.setVisible(False)
-        draw_layout.addWidget(self._style_widget)
         draw_group.setLayout(draw_layout)
         center.addWidget(draw_group)
 
@@ -366,7 +368,11 @@ class MainWindow(QMainWindow):
         right_w.layout().addWidget(right_panel)
         right_w.setMaximumWidth(320)
         splitter.addWidget(right_w)
-        splitter.setSizes([280, 1000, 320])
+        # Dimensioni splitter che restano entro lo schermo disponibile (evita setGeometry warning)
+        screen = QApplication.primaryScreen()
+        avail = (screen.availableGeometry().width() - 40) if screen else 1600
+        center_sz = max(500, avail - 280 - 320)
+        splitter.setSizes([280, center_sz, 320])
 
         self.setCentralWidget(splitter)
 
@@ -721,14 +727,8 @@ class MainWindow(QMainWindow):
         self.drawing_overlay.setTool(tool)
         for t, btn in self._draw_btns.items():
             btn.setChecked(t == tool)
-        self._style_widget.setVisible(tool in (DrawTool.ARROW, DrawTool.LINE))
         if tool in (DrawTool.ARROW, DrawTool.LINE):
-            self.drawing_overlay.setArrowLineStyle(self.style_combo.currentData())
-
-    def _on_arrow_line_style_changed(self, _index):
-        st = self.style_combo.currentData()
-        if st is not None:
-            self.drawing_overlay.setArrowLineStyle(st)
+            self.drawing_overlay.setArrowLineStyle(ArrowLineStyle.STRAIGHT)
 
     def _show_color_size_menu(self):
         menu = QMenu(self)

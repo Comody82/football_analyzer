@@ -29,6 +29,10 @@ class DrawTool(Enum):
     CURVED_LINE = "curved_line"  # linea curva con punto di controllo
     CURVED_ARROW = "curved_arrow"  # freccia curva
     PARABOLA_ARROW = "parabola_arrow"  # freccia parabolica (passaggio alto)
+    DASHED_ARROW = "dashed_arrow"  # freccia tratteggiata
+    ZIGZAG_ARROW = "zigzag_arrow"  # freccia zigzag
+    DOUBLE_ARROW = "double_arrow"  # freccia doppia punta
+    DASHED_LINE = "dashed_line"  # linea tratteggiata
 
 
 class ArrowLineStyle(Enum):
@@ -36,6 +40,23 @@ class ArrowLineStyle(Enum):
     STRAIGHT = "Freccia/Linea"
     DASHED = "Freccia/Linea - Trattino"
     ZIGZAG = "Freccia/Linea - A zig zag"
+
+
+def _get_arrow_line_tool_params(tool: DrawTool, current_style: ArrowLineStyle) -> Tuple[ArrowLineStyle, bool, bool]:
+    """(style, is_arrow, head_at_start) per strumenti freccia/linea."""
+    if tool == DrawTool.DASHED_ARROW:
+        return ArrowLineStyle.DASHED, True, False
+    if tool == DrawTool.ZIGZAG_ARROW:
+        return ArrowLineStyle.ZIGZAG, True, False
+    if tool == DrawTool.DOUBLE_ARROW:
+        return ArrowLineStyle.STRAIGHT, True, True
+    if tool == DrawTool.DASHED_LINE:
+        return ArrowLineStyle.DASHED, False, False
+    if tool == DrawTool.ARROW:
+        return current_style, True, False
+    if tool == DrawTool.LINE:
+        return current_style, False, False
+    return ArrowLineStyle.STRAIGHT, True, False
 
 
 def _zigzag_segment(path: QPainterPath, pa: QPointF, pb: QPointF, zig_amt: float = 12) -> None:
@@ -61,24 +82,94 @@ def _zigzag_segment(path: QPainterPath, pa: QPointF, pb: QPointF, zig_amt: float
     path.lineTo(pb)
 
 
-def _build_arrow_line_path(style: ArrowLineStyle, p1: QPointF, p2: QPointF) -> QPainterPath:
-    """Costruisce il path per lo stile dato e i due punti."""
+def _build_arrow_line_path(style: ArrowLineStyle, p1: QPointF, p2: QPointF,
+                          trim_end: float = 0, trim_start: float = 0) -> QPainterPath:
+    """Costruisce il path per lo stile dato e i due punti.
+    trim_end/trim_start: accorcia il path dalla punta (per lasciare spazio alle frecce)."""
     path = QPainterPath()
-    path.moveTo(p1)
     dx = p2.x() - p1.x()
     dy = p2.y() - p1.y()
     length = math.sqrt(dx * dx + dy * dy) or 1
-    zig_amt = max(4, min(8, length * 0.04))
+    ux, uy = dx / length, dy / length
+    p1_eff = QPointF(p1.x() + ux * trim_start, p1.y() + uy * trim_start) if trim_start > 0 else p1
+    p2_eff = QPointF(p2.x() - ux * trim_end, p2.y() - uy * trim_end) if trim_end > 0 else p2
+    path.moveTo(p1_eff)
+    len_eff = math.sqrt((p2_eff.x() - p1_eff.x()) ** 2 + (p2_eff.y() - p1_eff.y()) ** 2) or 1
+    zig_amt = max(4, min(8, len_eff * 0.04))
 
     if style == ArrowLineStyle.STRAIGHT or style == ArrowLineStyle.DASHED:
-        path.lineTo(p2)
+        path.lineTo(p2_eff)
     elif style == ArrowLineStyle.ZIGZAG:
-        _zigzag_segment(path, p1, p2, zig_amt)
+        _zigzag_segment(path, p1_eff, p2_eff, zig_amt)
     return path
 
 
 def _is_dashed_style(style: ArrowLineStyle) -> bool:
     return style == ArrowLineStyle.DASHED
+
+
+def _arrow_tip_angle(p1: QPointF, p2: QPointF) -> float:
+    """Angolo (radianti) della direzione da p1 verso p2."""
+    return math.atan2(p2.y() - p1.y(), p2.x() - p1.x())
+
+
+def _arrow_head_polygon(tip: QPointF, angle: float, length: float,
+                        base_width: float) -> QPolygonF:
+    """Triangolo punta freccia: tip = vertice, base perpendicolare alla direzione."""
+    half = base_width / 2
+    cx = tip.x() - length * math.cos(angle)
+    cy = tip.y() - length * math.sin(angle)
+    perp_x = -math.sin(angle)
+    perp_y = math.cos(angle)
+    a = QPointF(cx - perp_x * half, cy - perp_y * half)
+    b = QPointF(cx + perp_x * half, cy + perp_y * half)
+    return QPolygonF([a, tip, b])
+
+
+def _make_bevel_gradient(p_light: QPointF, p_dark: QPointF, base_color: QColor) -> QLinearGradient:
+    """Gradiente con 4+ color stop per effetto bevel/estrusione 3D."""
+    grad = QLinearGradient(p_light, p_dark)
+    light = QColor(min(255, base_color.red() + 80), min(255, base_color.green() + 80), min(255, base_color.blue() + 80))
+    light_mid = QColor(min(255, base_color.red() + 35), min(255, base_color.green() + 35), min(255, base_color.blue() + 35))
+    dark_mid = QColor(max(0, base_color.red() - 35), max(0, base_color.green() - 35), max(0, base_color.blue() - 35))
+    dark = QColor(max(0, base_color.red() - 80), max(0, base_color.green() - 80), max(0, base_color.blue() - 80))
+    grad.setColorAt(0.0, light)      # bordo superiore
+    grad.setColorAt(0.25, light_mid) # transizione
+    grad.setColorAt(0.5, base_color)  # centro
+    grad.setColorAt(0.75, dark_mid)  # transizione
+    grad.setColorAt(1.0, dark)        # bordo inferiore
+    return grad
+
+
+def _make_body_only_shape(body_path: QPainterPath, body_width: float) -> QPainterPath:
+    """Solo corpo stroked, senza punte (per ombra)."""
+    stroker = QPainterPathStroker()
+    stroker.setWidth(body_width)
+    stroker.setCurveThreshold(0.5)
+    stroker.setCapStyle(Qt.FlatCap)
+    stroker.setJoinStyle(Qt.RoundJoin)
+    return stroker.createStroke(body_path)
+
+
+def _make_volumetric_arrow_shape(body_path: QPainterPath, p1: QPointF, p2: QPointF,
+                                  body_width: float, head_length: float,
+                                  head_width_factor: float = 2.5,
+                                  head_at_start: bool = False) -> QPainterPath:
+    """Path riempito: corpo stroked (FlatCap) + punte triangolari."""
+    result = QPainterPath(_make_body_only_shape(body_path, body_width))
+    result.setFillRule(Qt.WindingFill)
+    angle = _arrow_tip_angle(p1, p2)
+    head_poly = _arrow_head_polygon(p2, angle, head_length, body_width * head_width_factor)
+    hp = QPainterPath()
+    hp.addPolygon(head_poly)
+    result.addPath(hp)
+    if head_at_start:
+        angle_s = angle + math.pi
+        head_poly_s = _arrow_head_polygon(p1, angle_s, head_length, body_width * head_width_factor)
+        hp2 = QPainterPath()
+        hp2.addPolygon(head_poly_s)
+        result.addPath(hp2)
+    return result
 
 
 class ResizeHandle(QGraphicsRectItem):
@@ -162,39 +253,51 @@ class DrawableRectangle(QGraphicsRectItem):
 
 
 class DrawableArrow(QGraphicsPathItem):
-    """Frecce disegnabili con vari stili."""
+    """Frecce volumetriche 3D: corpo poligonale + punta triangolare piena, effetto bevel, ombra solo su corpo."""
+    HEAD_WIDTH_FACTOR = 2.5
+    SHADOW_OFFSET_PX = 3
+    HIGHLIGHT_OPACITY = 0.2
+
     def __init__(self, x1: float, y1: float, x2: float, y2: float,
                  color: QColor = Qt.red, width: int = 4,
-                 style: ArrowLineStyle = ArrowLineStyle.STRAIGHT):
+                 style: ArrowLineStyle = ArrowLineStyle.STRAIGHT,
+                 head_at_start: bool = False):
         super().__init__()
         self._p1 = QPointF(x1, y1)
         self._p2 = QPointF(x2, y2)
         self._color = color
-        self._width = width
+        self._width = max(2, width)
         self._style = style
-        self._arrow_size = 15
-        self._head_at_start = False
+        self._arrow_size = max(12, self._width * 3)
+        self._head_at_start = head_at_start
         self._update_path()
 
     def _update_path(self):
-        path = _build_arrow_line_path(self._style, self._p1, self._p2)
-        self.setPath(path)
-        pen = QPen(self._color, self._width)
-        if _is_dashed_style(self._style):
-            pen.setStyle(Qt.DashLine)
-        self.setPen(pen)
+        trim_end = float(self._arrow_size)
+        trim_start = float(self._arrow_size) if self._head_at_start else 0
+        body_path = _build_arrow_line_path(
+            self._style, self._p1, self._p2, trim_end=trim_end, trim_start=trim_start
+        )
+        self._centerline_path = _build_arrow_line_path(self._style, self._p1, self._p2)
+        self._highlight_centerline_path = body_path  # accorciato, senza punte
+        self._body_path_for_shadow = _make_body_only_shape(body_path, float(self._width))
+        vol_path = _make_volumetric_arrow_shape(
+            body_path, self._p1, self._p2,
+            float(self._width), float(self._arrow_size),
+            self.HEAD_WIDTH_FACTOR, self._head_at_start
+        )
+        self.setPath(vol_path)
+        self.setPen(QPen(Qt.NoPen))
         self.setBrush(QBrush(Qt.NoBrush))
         self.setFlag(self.GraphicsItemFlag.ItemIsMovable, False)
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable)
 
     def shape(self):
-        """Area di selezione più ampia per facilitare il clic."""
         s = QPainterPathStroker()
-        s.setWidth(max(20, self._width + 12))
+        s.setWidth(max(8, self._width + 6))
         return s.createStroke(self.path())
 
     def line(self):
-        """Per compatibilità con resize (estremi p1, p2)."""
         return QLineF(self._p1, self._p2)
 
     def setLine(self, x1: float, y1: float, x2: float, y2: float):
@@ -203,38 +306,52 @@ class DrawableArrow(QGraphicsPathItem):
         self._update_path()
 
     def paint(self, painter, option, widget):
-        painter.setPen(self.pen())
-        painter.drawPath(self.path())
-        p1, p2 = self._p1, self._p2
-        # Direzione tangente all'estremità (per curva/zigzag usiamo la linea globale)
-        angle = math.atan2(p2.y() - p1.y(), p2.x() - p1.x())
-        # Punta finale (p2)
-        arrow_a = p2 - QPointF(
-            self._arrow_size * math.cos(angle - math.pi / 6),
-            self._arrow_size * math.sin(angle - math.pi / 6)
-        )
-        arrow_b = p2 - QPointF(
-            self._arrow_size * math.cos(angle + math.pi / 6),
-            self._arrow_size * math.sin(angle + math.pi / 6)
-        )
-        painter.drawLine(p2, arrow_a)
-        painter.drawLine(p2, arrow_b)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.setRenderHint(QPainter.HighQualityAntialiasing, True)
+        path = self.path()
+        angle = _arrow_tip_angle(self._p1, self._p2)
+        perp_x, perp_y = -math.sin(angle), math.cos(angle)
+        cx = (self._p1.x() + self._p2.x()) / 2
+        cy = (self._p1.y() + self._p2.y()) / 2
+        half_len = math.sqrt((self._p2.x() - self._p1.x()) ** 2 + (self._p2.y() - self._p1.y()) ** 2) / 2 or 1
+        head_polys = [
+            _arrow_head_polygon(self._p2, angle, self._arrow_size, self._width * self.HEAD_WIDTH_FACTOR)
+        ]
         if self._head_at_start:
-            angle_s = angle + math.pi
-            arrow_a1 = p1 - QPointF(
-                self._arrow_size * math.cos(angle_s - math.pi / 6),
-                self._arrow_size * math.sin(angle_s - math.pi / 6)
+            head_polys.append(
+                _arrow_head_polygon(self._p1, angle + math.pi, self._arrow_size, self._width * self.HEAD_WIDTH_FACTOR)
             )
-            arrow_b1 = p1 - QPointF(
-                self._arrow_size * math.cos(angle_s + math.pi / 6),
-                self._arrow_size * math.sin(angle_s + math.pi / 6)
-            )
-            painter.drawLine(p1, arrow_a1)
-            painter.drawLine(p1, arrow_b1)
+        # 1. Ombra solo sul corpo (senza punta)
+        tr_shadow = QTransform().translate(self.SHADOW_OFFSET_PX, self.SHADOW_OFFSET_PX)
+        painter.setPen(QPen(Qt.NoPen))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 100)))
+        painter.drawPath(tr_shadow.map(self._body_path_for_shadow))
+        # 2. Corpo e punte: poligono pieno con gradiente bevel (4+ color stop)
+        p_light = QPointF(cx - perp_x * half_len, cy - perp_y * half_len)
+        p_dark = QPointF(cx + perp_x * half_len, cy + perp_y * half_len)
+        grad = _make_bevel_gradient(p_light, p_dark, self._color)
+        painter.setPen(QPen(Qt.NoPen))
+        painter.setBrush(QBrush(grad))
+        painter.drawPath(path)
+        for poly in head_polys:
+            painter.drawPolygon(poly)
+        # 3. Highlight centrale: shape più stretta, accorciato (non sotto la punta)
+        hl_w = max(1, int(self._width * 0.35))
+        up_x, up_y = perp_x * (self._width * 0.3), perp_y * (self._width * 0.3)
+        tr_hl = QTransform().translate(up_x, up_y)
+        stroker_hl = QPainterPathStroker()
+        stroker_hl.setWidth(hl_w)
+        stroker_hl.setCapStyle(Qt.RoundCap)
+        stroker_hl.setCurveThreshold(0.5)
+        hl_path = stroker_hl.createStroke(tr_hl.map(self._highlight_centerline_path))
+        painter.setBrush(QBrush(QColor(255, 255, 255, int(255 * self.HIGHLIGHT_OPACITY))))
+        painter.drawPath(hl_path)
+        # 4. Selezione
         if self.isSelected():
             painter.setPen(QPen(QColor(255, 255, 255), 3, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawPath(self.path())
+            painter.drawPath(path)
 
     def setDrawColor(self, c: QColor):
         self._color = c
@@ -316,8 +433,25 @@ def _quadratic_curve_path(p1: QPointF, ctrl: QPointF, p2: QPointF) -> QPainterPa
 
 def _bezier_tangent_at_end(p1: QPointF, ctrl: QPointF, p2: QPointF) -> float:
     """Angolo tangente (radianti) alla curva Bezier quadratica all'estremità t=1."""
-    # Derivata: B'(1) = 2(P2 - C) dove C=ctrl
     return math.atan2(p2.y() - ctrl.y(), p2.x() - ctrl.x())
+
+
+def _quadratic_curve_path_trimmed(p1: QPointF, ctrl: QPointF, p2: QPointF,
+                                  trim_from_end: float) -> QPainterPath:
+    """Curva Bezier quadratica accorciata di trim_from_end dalla fine (approssimazione)."""
+    if trim_from_end <= 0:
+        return _quadratic_curve_path(p1, ctrl, p2)
+    dist = math.sqrt((p2.x() - ctrl.x()) ** 2 + (p2.y() - ctrl.y()) ** 2) or 1
+    t_trim = max(0.0, 1.0 - trim_from_end / (2.0 * dist))
+    u = 1 - t_trim
+    p2_eff = QPointF(
+        u * u * p1.x() + 2 * u * t_trim * ctrl.x() + t_trim * t_trim * p2.x(),
+        u * u * p1.y() + 2 * u * t_trim * ctrl.y() + t_trim * t_trim * p2.y()
+    )
+    path = QPainterPath()
+    path.moveTo(p1)
+    path.quadTo(ctrl, p2_eff)
+    return path
 
 
 class DrawableCurvedLine(QGraphicsPathItem):
@@ -366,7 +500,11 @@ class DrawableCurvedLine(QGraphicsPathItem):
 
 
 class DrawableCurvedArrow(QGraphicsPathItem):
-    """Freccia curva con punta orientata lungo la tangente all'estremità."""
+    """Freccia curva volumetrica 3D: corpo Bezier + punta, effetto bevel, ombra solo su corpo."""
+    HEAD_WIDTH_FACTOR = 2.5
+    SHADOW_OFFSET_PX = 3
+    HIGHLIGHT_OPACITY = 0.2
+
     def __init__(self, p1: QPointF, ctrl: QPointF, p2: QPointF,
                  color: QColor = Qt.red, pen_width: int = 4):
         super().__init__()
@@ -374,20 +512,34 @@ class DrawableCurvedArrow(QGraphicsPathItem):
         self._ctrl = QPointF(ctrl)
         self._p2 = QPointF(p2)
         self._color = color
-        self._pen_width = pen_width
-        self._arrow_size = 15
+        self._pen_width = max(2, pen_width)
+        self._arrow_size = max(12, self._pen_width * 3)
         self._update_path()
 
     def _update_path(self):
-        self.setPath(_quadratic_curve_path(self._p1, self._ctrl, self._p2))
-        self.setPen(QPen(self._color, self._pen_width))
+        body_path = _quadratic_curve_path_trimmed(
+            self._p1, self._ctrl, self._p2, float(self._arrow_size)
+        )
+        self._centerline_path = _quadratic_curve_path(self._p1, self._ctrl, self._p2)
+        self._highlight_centerline_path = body_path  # accorciato, senza punta
+        self._body_path_for_shadow = _make_body_only_shape(body_path, float(self._pen_width))
+        angle = _bezier_tangent_at_end(self._p1, self._ctrl, self._p2)
+        vol_path = _make_volumetric_arrow_shape(
+            body_path,
+            self._p2 - QPointF(math.cos(angle), math.sin(angle)),
+            self._p2,
+            float(self._pen_width), float(self._arrow_size),
+            self.HEAD_WIDTH_FACTOR, False
+        )
+        self.setPath(vol_path)
+        self.setPen(QPen(Qt.NoPen))
         self.setBrush(QBrush(Qt.NoBrush))
         self.setFlag(self.GraphicsItemFlag.ItemIsMovable, False)
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable)
 
     def shape(self):
         s = QPainterPathStroker()
-        s.setWidth(max(20, self._pen_width + 12))
+        s.setWidth(max(8, self._pen_width + 6))
         return s.createStroke(self.path())
 
     def getPoints(self) -> List[QPointF]:
@@ -404,28 +556,51 @@ class DrawableCurvedArrow(QGraphicsPathItem):
         self._update_path()
 
     def paint(self, painter, option, widget):
-        painter.setPen(self.pen())
-        painter.drawPath(self.path())
-        # Punta freccia orientata lungo la tangente alla curva all'estremità
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.setRenderHint(QPainter.HighQualityAntialiasing, True)
+        path = self.path()
         angle = _bezier_tangent_at_end(self._p1, self._ctrl, self._p2)
-        arrow_a = self._p2 - QPointF(
-            self._arrow_size * math.cos(angle - math.pi / 6),
-            self._arrow_size * math.sin(angle - math.pi / 6)
+        perp_x, perp_y = -math.sin(angle), math.cos(angle)
+        cx, cy = (self._p1.x() + self._p2.x()) / 2, (self._p1.y() + self._p2.y()) / 2
+        half_len = math.sqrt((self._p2.x() - self._p1.x()) ** 2 + (self._p2.y() - self._p1.y()) ** 2) / 2 or 1
+        head_poly = _arrow_head_polygon(
+            self._p2, angle, self._arrow_size,
+            float(self._pen_width) * self.HEAD_WIDTH_FACTOR
         )
-        arrow_b = self._p2 - QPointF(
-            self._arrow_size * math.cos(angle + math.pi / 6),
-            self._arrow_size * math.sin(angle + math.pi / 6)
-        )
-        painter.drawLine(self._p2, arrow_a)
-        painter.drawLine(self._p2, arrow_b)
+        tr_shadow = QTransform().translate(self.SHADOW_OFFSET_PX, self.SHADOW_OFFSET_PX)
+        painter.setPen(QPen(Qt.NoPen))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 100)))
+        painter.drawPath(tr_shadow.map(self._body_path_for_shadow))
+        p_light = QPointF(cx - perp_x * half_len, cy - perp_y * half_len)
+        p_dark = QPointF(cx + perp_x * half_len, cy + perp_y * half_len)
+        grad = _make_bevel_gradient(p_light, p_dark, self._color)
+        painter.setBrush(QBrush(grad))
+        painter.drawPath(path)
+        painter.drawPolygon(head_poly)
+        hl_w = max(1, int(self._pen_width * 0.35))
+        up_x, up_y = perp_x * (self._pen_width * 0.3), perp_y * (self._pen_width * 0.3)
+        tr_hl = QTransform().translate(up_x, up_y)
+        stroker_hl = QPainterPathStroker()
+        stroker_hl.setWidth(hl_w)
+        stroker_hl.setCapStyle(Qt.RoundCap)
+        stroker_hl.setCurveThreshold(0.5)
+        hl_path = stroker_hl.createStroke(tr_hl.map(self._highlight_centerline_path))
+        painter.setBrush(QBrush(QColor(255, 255, 255, int(255 * self.HIGHLIGHT_OPACITY))))
+        painter.drawPath(hl_path)
         if self.isSelected():
             painter.setPen(QPen(QColor(255, 255, 255), 3, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawPath(self.path())
+            painter.drawPath(path)
 
 
 class DrawableParabolaArrow(QGraphicsPathItem):
-    """Freccia parabolica per passaggio alto - curva verso l'alto con effetto 3D (ombra/glow)."""
+    """Freccia parabolica volumetrica 3D: curva + punta, effetto bevel, ombra corpo + linea p1-p2 sotto."""
+    HEAD_WIDTH_FACTOR = 2.5
+    SHADOW_OFFSET_PX = 3
+    HIGHLIGHT_OPACITY = 0.2
+    SHADOW_LINE_OPACITY = 0.35  # opacità ridotta per linea ombra p1-p2
+
     def __init__(self, p1: QPointF, ctrl: QPointF, p2: QPointF,
                  color: QColor = Qt.red, pen_width: int = 4):
         super().__init__()
@@ -433,20 +608,33 @@ class DrawableParabolaArrow(QGraphicsPathItem):
         self._ctrl = QPointF(ctrl)
         self._p2 = QPointF(p2)
         self._color = color
-        self._pen_width = pen_width
-        self._arrow_size = 15
+        self._pen_width = max(2, pen_width)
+        self._arrow_size = max(12, self._pen_width * 3)
         self._update_path()
 
     def _update_path(self):
-        self.setPath(_quadratic_curve_path(self._p1, self._ctrl, self._p2))
-        self.setPen(QPen(self._color, self._pen_width))
+        body_path = _quadratic_curve_path_trimmed(
+            self._p1, self._ctrl, self._p2, float(self._arrow_size)
+        )
+        self._centerline_path = _quadratic_curve_path(self._p1, self._ctrl, self._p2)
+        self._highlight_centerline_path = body_path  # accorciato, senza punta
+        self._body_path_for_shadow = _make_body_only_shape(body_path, float(self._pen_width))
+        angle = _bezier_tangent_at_end(self._p1, self._ctrl, self._p2)
+        back = QPointF(math.cos(angle), math.sin(angle))
+        vol_path = _make_volumetric_arrow_shape(
+            body_path, self._p2 - back, self._p2,
+            float(self._pen_width), float(self._arrow_size),
+            self.HEAD_WIDTH_FACTOR, False
+        )
+        self.setPath(vol_path)
+        self.setPen(QPen(Qt.NoPen))
         self.setBrush(QBrush(Qt.NoBrush))
         self.setFlag(self.GraphicsItemFlag.ItemIsMovable, False)
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable)
 
     def shape(self):
         s = QPainterPathStroker()
-        s.setWidth(max(20, self._pen_width + 12))
+        s.setWidth(max(8, self._pen_width + 6))
         return s.createStroke(self.path())
 
     def getPoints(self) -> List[QPointF]:
@@ -463,33 +651,49 @@ class DrawableParabolaArrow(QGraphicsPathItem):
         self._update_path()
 
     def paint(self, painter, option, widget):
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.setRenderHint(QPainter.HighQualityAntialiasing, True)
         path = self.path()
-        # Ombra per effetto 3D (offset + colore scuro)
-        shadow_offset = 4
-        shadow_color = QColor(0, 0, 0, 60)
-        painter.setPen(QPen(shadow_color, self._pen_width + 2))
-        painter.setBrush(Qt.NoBrush)
-        tr = QTransform().translate(shadow_offset, shadow_offset)
-        painter.drawPath(tr.map(path))
-        # Glow esterno (pen più largo e semi-trasparente)
-        glow_color = QColor(self._color.red(), self._color.green(), self._color.blue(), 50)
-        painter.setPen(QPen(glow_color, self._pen_width + 6))
-        painter.drawPath(path)
-        # Linea principale
-        painter.setPen(QPen(self._color, self._pen_width))
-        painter.drawPath(path)
-        # Punta freccia
         angle = _bezier_tangent_at_end(self._p1, self._ctrl, self._p2)
-        arrow_a = self._p2 - QPointF(
-            self._arrow_size * math.cos(angle - math.pi / 6),
-            self._arrow_size * math.sin(angle - math.pi / 6)
+        perp_x, perp_y = -math.sin(angle), math.cos(angle)
+        cx, cy = (self._p1.x() + self._p2.x()) / 2, (self._p1.y() + self._p2.y()) / 2
+        half_len = math.sqrt((self._p2.x() - self._p1.x()) ** 2 + (self._p2.y() - self._p1.y()) ** 2) / 2 or 1
+        head_poly = _arrow_head_polygon(
+            self._p2, angle, self._arrow_size,
+            float(self._pen_width) * self.HEAD_WIDTH_FACTOR
         )
-        arrow_b = self._p2 - QPointF(
-            self._arrow_size * math.cos(angle + math.pi / 6),
-            self._arrow_size * math.sin(angle + math.pi / 6)
+        # 1. Ombra linea retta p1-p2 sotto la curva (grigio scuro, opacità ridotta)
+        shadow_line = QLineF(self._p1, self._p2)
+        shadow_line_tr = QLineF(
+            shadow_line.p1().x() + self.SHADOW_OFFSET_PX, shadow_line.p1().y() + self.SHADOW_OFFSET_PX,
+            shadow_line.p2().x() + self.SHADOW_OFFSET_PX, shadow_line.p2().y() + self.SHADOW_OFFSET_PX
         )
-        painter.drawLine(self._p2, arrow_a)
-        painter.drawLine(self._p2, arrow_b)
+        shadow_gray = QColor(50, 50, 50, int(255 * self.SHADOW_LINE_OPACITY))
+        painter.setPen(QPen(shadow_gray, max(2, self._pen_width)))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawLine(shadow_line_tr)
+        # 2. Ombra corpo (senza punta)
+        tr_shadow = QTransform().translate(self.SHADOW_OFFSET_PX, self.SHADOW_OFFSET_PX)
+        painter.setPen(QPen(Qt.NoPen))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 100)))
+        painter.drawPath(tr_shadow.map(self._body_path_for_shadow))
+        p_light = QPointF(cx - perp_x * half_len, cy - perp_y * half_len)
+        p_dark = QPointF(cx + perp_x * half_len, cy + perp_y * half_len)
+        grad = _make_bevel_gradient(p_light, p_dark, self._color)
+        painter.setBrush(QBrush(grad))
+        painter.drawPath(path)
+        painter.drawPolygon(head_poly)
+        hl_w = max(1, int(self._pen_width * 0.35))
+        up_x, up_y = perp_x * (self._pen_width * 0.3), perp_y * (self._pen_width * 0.3)
+        tr_hl = QTransform().translate(up_x, up_y)
+        stroker_hl = QPainterPathStroker()
+        stroker_hl.setWidth(hl_w)
+        stroker_hl.setCapStyle(Qt.RoundCap)
+        stroker_hl.setCurveThreshold(0.5)
+        hl_path = stroker_hl.createStroke(tr_hl.map(self._highlight_centerline_path))
+        painter.setBrush(QBrush(QColor(255, 255, 255, int(255 * self.HIGHLIGHT_OPACITY))))
+        painter.drawPath(hl_path)
         if self.isSelected():
             painter.setPen(QPen(QColor(255, 255, 255), 3, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
@@ -497,13 +701,15 @@ class DrawableParabolaArrow(QGraphicsPathItem):
 
 
 class DrawableText(QGraphicsTextItem):
-    """Testo disegnabile."""
+    """Testo disegnabile: QGraphicsTextItem, editabile subito, 24px, bianco."""
     def __init__(self, text: str = "", color: QColor = Qt.white):
         super().__init__(text)
         self.setDefaultTextColor(color)
         self.setFlag(self.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable)
-        font = QFont("Segoe UI", 14, QFont.Bold)
+        self.setFlag(self.GraphicsItemFlag.ItemIsFocusable)
+        self.setTextInteractionFlags(Qt.TextEditorInteraction)
+        font = QFont("Segoe UI", 24, QFont.Bold)
         self.setFont(font)
         self._color = color
 
@@ -610,8 +816,8 @@ class DrawingOverlay(QGraphicsView):
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
         self._tool = DrawTool.NONE
-        self._color = QColor("#FF0000")
-        self._pen_width = 4
+        self._color = QColor("#FFFF00")
+        self._pen_width = 8
         self._arrow_line_style = ArrowLineStyle.STRAIGHT
         self._start_pos: Optional[QPointF] = None
         self._current_item = None
@@ -727,11 +933,11 @@ class DrawingOverlay(QGraphicsView):
         new_pos = QPointF(pos.x() + offset_x, pos.y() + offset_y)
         t = data.get("type")
         if t == "circle":
-            item = DrawableCircle(data["rect"], data["color"], data.get("pen_width", 4))
+            item = DrawableCircle(data["rect"], data["color"], data.get("pen_width", 8))
             item.setPos(new_pos)
             return item
         if t == "rectangle":
-            item = DrawableRectangle(data["rect"], data["color"], data.get("pen_width", 4))
+            item = DrawableRectangle(data["rect"], data["color"], data.get("pen_width", 8))
             item.setPos(new_pos)
             return item
         if t == "arrow":
@@ -740,17 +946,16 @@ class DrawingOverlay(QGraphicsView):
             np1 = QPointF(p1.x() + offset_x, p1.y() + offset_y)
             np2 = QPointF(p2.x() + offset_x, p2.y() + offset_y)
             item = DrawableArrow(np1.x(), np1.y(), np2.x(), np2.y(), data["color"],
-                                data.get("width", 4), data.get("style", ArrowLineStyle.STRAIGHT))
+                                data.get("width", 8), data.get("style", ArrowLineStyle.STRAIGHT),
+                                data.get("head_start", False))
             item.setPos(0, 0)
-            item._head_at_start = data.get("head_start", False)
-            item._update_path()
             return item
         if t == "line":
             p1, p2 = data["p1"], data["p2"]
             np1 = QPointF(p1.x() + offset_x, p1.y() + offset_y)
             np2 = QPointF(p2.x() + offset_x, p2.y() + offset_y)
             item = DrawableLine(np1.x(), np1.y(), np2.x(), np2.y(), data["color"],
-                               data.get("width", 4), data.get("style", ArrowLineStyle.STRAIGHT))
+                               data.get("width", 8), data.get("style", ArrowLineStyle.STRAIGHT))
             item.setPos(0, 0)
             return item
         if t == "cone":
@@ -762,28 +967,28 @@ class DrawingOverlay(QGraphicsView):
             item.setPos(new_pos)
             return item
         if t == "freehand":
-            item = DrawableFreehand(data["path"], data["color"], data.get("pen_width", 4))
+            item = DrawableFreehand(data["path"], data["color"], data.get("pen_width", 8))
             item.setPos(new_pos)
             return item
         if t == "curved_line":
             p1 = QPointF(data["p1"].x() + offset_x, data["p1"].y() + offset_y)
             ctrl = QPointF(data["ctrl"].x() + offset_x, data["ctrl"].y() + offset_y)
             p2 = QPointF(data["p2"].x() + offset_x, data["p2"].y() + offset_y)
-            item = DrawableCurvedLine(p1, ctrl, p2, data["color"], data.get("pen_width", 4))
+            item = DrawableCurvedLine(p1, ctrl, p2, data["color"], data.get("pen_width", 8))
             item.setPos(0, 0)
             return item
         if t == "curved_arrow":
             p1 = QPointF(data["p1"].x() + offset_x, data["p1"].y() + offset_y)
             ctrl = QPointF(data["ctrl"].x() + offset_x, data["ctrl"].y() + offset_y)
             p2 = QPointF(data["p2"].x() + offset_x, data["p2"].y() + offset_y)
-            item = DrawableCurvedArrow(p1, ctrl, p2, data["color"], data.get("pen_width", 4))
+            item = DrawableCurvedArrow(p1, ctrl, p2, data["color"], data.get("pen_width", 8))
             item.setPos(0, 0)
             return item
         if t == "parabola_arrow":
             p1 = QPointF(data["p1"].x() + offset_x, data["p1"].y() + offset_y)
             ctrl = QPointF(data["ctrl"].x() + offset_x, data["ctrl"].y() + offset_y)
             p2 = QPointF(data["p2"].x() + offset_x, data["p2"].y() + offset_y)
-            item = DrawableParabolaArrow(p1, ctrl, p2, data["color"], data.get("pen_width", 4))
+            item = DrawableParabolaArrow(p1, ctrl, p2, data["color"], data.get("pen_width", 8))
             item.setPos(0, 0)
             return item
         return None
@@ -861,20 +1066,25 @@ class DrawingOverlay(QGraphicsView):
             self._deselect_shape()
             self._resize_drag_handle_index = None
             self._is_moving = False
-        if event.button() == Qt.LeftButton and self._tool not in (DrawTool.NONE, DrawTool.TEXT, DrawTool.ZOOM):
+        if event.button() == Qt.LeftButton and self._tool == DrawTool.TEXT:
+            scene_pos = self.mapToScene(event.pos())
+            self._clear_resize_handles()
+            self._start_freeze()
+            item = DrawableText("", QColor(Qt.white))
+            item.setPos(scene_pos)
+            self.scene().addItem(item)
+            self._items.append(item)
+            self.drawingAdded.emit(item)
+            self.scene().setFocusItem(item)
+            self.setFocus()
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton and self._tool not in (DrawTool.NONE, DrawTool.ZOOM):
             scene_pos = self.mapToScene(event.pos())
             self._clear_resize_handles()
             self._start_pos = scene_pos
             self._start_freeze()
-            if self._tool == DrawTool.TEXT:
-                text, ok = QInputDialog.getText(self, "Testo", "Inserisci testo:")
-                if ok and text:
-                    item = DrawableText(text, self._color)
-                    item.setPos(scene_pos)
-                    self.scene().addItem(item)
-                    self._items.append(item)
-                    self.drawingAdded.emit(item)
-            elif self._tool == DrawTool.PENCIL:
+            if self._tool == DrawTool.PENCIL:
                 self._pencil_path = QPainterPath()
                 self._pencil_path.moveTo(scene_pos)
         elif event.button() == Qt.RightButton:
@@ -918,7 +1128,7 @@ class DrawingOverlay(QGraphicsView):
             elif isinstance(target, (DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
                 current = target._pen_width
             else:
-                current = int(target.pen().widthF()) if target.pen().widthF() > 0 else 4
+                current = int(target.pen().widthF()) if target.pen().widthF() > 0 else 8
             w, ok = QInputDialog.getInt(self, "Modifica spessore", "Spessore (px):", current, 1, 20)
             if ok:
                 if isinstance(target, (DrawableArrow, DrawableLine)):
@@ -1163,14 +1373,17 @@ class DrawingOverlay(QGraphicsView):
             self._current_item.setBrush(QBrush(Qt.NoBrush))
             self.scene().addItem(self._current_item)
         elif self._start_pos and self._tool in (DrawTool.CIRCLE, DrawTool.ARROW, DrawTool.LINE, DrawTool.RECTANGLE, DrawTool.CONE,
-                                               DrawTool.CURVED_LINE, DrawTool.CURVED_ARROW, DrawTool.PARABOLA_ARROW):
+                                               DrawTool.CURVED_LINE, DrawTool.CURVED_ARROW, DrawTool.PARABOLA_ARROW,
+                                               DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW, DrawTool.DOUBLE_ARROW, DrawTool.DASHED_LINE):
             pos = self.mapToScene(event.pos())
             self._safe_remove_item(self._current_item)
-            if self._tool in (DrawTool.ARROW, DrawTool.LINE):
-                path = _build_arrow_line_path(self._arrow_line_style, self._start_pos, pos)
+            style, is_arrow, _ = _get_arrow_line_tool_params(self._tool, self._arrow_line_style)
+            if self._tool in (DrawTool.ARROW, DrawTool.LINE, DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW,
+                             DrawTool.DOUBLE_ARROW, DrawTool.DASHED_LINE):
+                path = _build_arrow_line_path(style, self._start_pos, pos)
                 self._current_item = QGraphicsPathItem(path)
                 pen = QPen(self._color, self._pen_width)
-                if _is_dashed_style(self._arrow_line_style):
+                if _is_dashed_style(style):
                     pen.setStyle(Qt.DashLine)
                 self._current_item.setPen(pen)
                 self._current_item.setBrush(QBrush(Qt.NoBrush))
@@ -1219,24 +1432,25 @@ class DrawingOverlay(QGraphicsView):
             self._is_moving = False
         if event.button() == Qt.LeftButton and self._start_pos:
             pos = self.mapToScene(event.pos())
-            if self._tool == DrawTool.ARROW and self._current_item:
+            style, is_arrow, head_at_start = _get_arrow_line_tool_params(self._tool, self._arrow_line_style)
+            if self._tool in (DrawTool.ARROW, DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW, DrawTool.DOUBLE_ARROW) and self._current_item:
                 item = DrawableArrow(
                     self._start_pos.x(), self._start_pos.y(),
                     pos.x(), pos.y(),
                     self._color, self._pen_width,
-                    self._arrow_line_style
+                    style, head_at_start
                 )
                 self._safe_remove_item(self._current_item)
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
                 self._current_item = None
-            elif self._tool == DrawTool.LINE and self._current_item:
+            elif self._tool in (DrawTool.LINE, DrawTool.DASHED_LINE) and self._current_item:
                 item = DrawableLine(
                     self._start_pos.x(), self._start_pos.y(),
                     pos.x(), pos.y(),
                     self._color, self._pen_width,
-                    self._arrow_line_style
+                    style
                 )
                 self._safe_remove_item(self._current_item)
                 self.scene().addItem(item)

@@ -63,6 +63,33 @@ def get_stylesheet() -> str:
         background-color: {ACCENT_HOVER};
     }}
 
+    QPushButton[drawToolBtn="true"] {{
+        width: 42px;
+        height: 42px;
+        min-width: 42px;
+        min-height: 42px;
+        max-width: 42px;
+        max-height: 42px;
+        padding: 0;
+        border: 1px solid {BORDER};
+    }}
+
+    QPushButton[drawToolBtn="true"]:checked {{
+        background-color: {ACCENT_DIM};
+        border-color: {ACCENT};
+        color: {TEXT_PRIMARY};
+    }}
+
+    QPushButton[drawToolBtn="true"]:checked:hover {{
+        background-color: {ACCENT};
+        color: {BG_DARK};
+    }}
+
+    QPushButton[drawToolbarBtn="true"] {{
+        min-height: 28px;
+        padding: 4px 8px;
+    }}
+
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
         background-color: {BG_CARD};
         color: {TEXT_PRIMARY};
