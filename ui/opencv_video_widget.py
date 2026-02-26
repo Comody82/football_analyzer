@@ -14,6 +14,7 @@ class OpenCVVideoWidget(QWidget):
     """Widget video che usa OpenCV per la riproduzione (funziona con MP4 su Windows)."""
     positionChanged = pyqtSignal(int)
     durationChanged = pyqtSignal(int)
+    playbackStateChanged = pyqtSignal(bool)  # True=playing, False=paused
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -225,15 +226,19 @@ class OpenCVVideoWidget(QWidget):
             self.stepForward()
             return
         self._playing = True
+        self.playbackStateChanged.emit(True)
         self._play_start_time = time.monotonic()
         self._play_start_position_ms = self._position_ms
         self._schedule_next_frame()
 
     def pause(self):
         self._playing = False
+        self.playbackStateChanged.emit(False)
         self._timer.stop()
 
     def stop(self):
+        if self._playing:
+            self.playbackStateChanged.emit(False)
         self._playing = False
         self._timer.stop()
         if self._capture:

@@ -137,6 +137,8 @@ class MainWindow(QMainWindow):
             self.event_manager.load_event_types(saved)
         else:
             self.event_manager.load_default_types(DEFAULT_EVENT_TYPES)
+        if not self.event_manager.get_event_type("annotazione"):
+            self.event_manager.add_event_type(EventType("annotazione", "Annotazione", "✏️", "#00D9A5"))
         self._event_clip_starts = {}  # evt_id -> start_ms per clip personalizzate
         self._clip_edit_event_id = None  # se impostato, modalità creazione clip per questo evento
         self._focus_label_event_id = None  # dopo refresh, metti focus sul campo nome di questo evento
@@ -159,6 +161,7 @@ class MainWindow(QMainWindow):
         # Zoom continuo (rotella) max 5x quando strumento Zoom è attivo
         self._zoom_level = 1.0
         self._zoom_max = 5.0
+        self._last_position_ms = 0
 
         # Timeline
         self.timeline_bar = EventTimelineBar()
@@ -248,10 +251,30 @@ class MainWindow(QMainWindow):
         center.addWidget(self.video_container, 1)
         center.addWidget(self.position_slider)
         ctrl_row = QHBoxLayout()
+        self.restart_btn = QPushButton("↺ Restart")
+        self.restart_btn.setToolTip("Riavvia dall'inizio e play")
+        self.restart_btn.clicked.connect(self._restart_video)
+        ctrl_row.addWidget(self.restart_btn)
         ctrl_row.addWidget(self.speed_btn)
         ctrl_row.addWidget(self.frame_btn)
         ctrl_row.addWidget(self.play_btn)
         ctrl_row.addWidget(self.pause_btn)
+        self.prev_event_btn = QPushButton("⏮")
+        self.prev_event_btn.setToolTip("Evento precedente")
+        self.prev_event_btn.clicked.connect(self._go_to_prev_event)
+        ctrl_row.addWidget(self.prev_event_btn)
+        self.next_event_btn = QPushButton("⏭")
+        self.next_event_btn.setToolTip("Evento successivo")
+        self.next_event_btn.clicked.connect(self._go_to_next_event)
+        ctrl_row.addWidget(self.next_event_btn)
+        self.zoom_btn = QPushButton()
+        self.zoom_btn.setProperty("drawToolBtn", True)
+        self.zoom_btn.setIcon(get_draw_tool_icon("zoom", 18))
+        self.zoom_btn.setIconSize(QSize(18, 18))
+        self.zoom_btn.setToolTip("Zoom (rotella verso il puntatore)")
+        self.zoom_btn.setCheckable(True)
+        self.zoom_btn.clicked.connect(self._toggle_zoom_tool)
+        ctrl_row.addWidget(self.zoom_btn)
         ctrl_row.addWidget(self.time_label, 1)
         center.addLayout(ctrl_row)
         center.addWidget(QLabel("Timeline eventi:"))
@@ -269,8 +292,6 @@ class MainWindow(QMainWindow):
             DrawTool.LINE: "Linea",
             DrawTool.RECTANGLE: "Rettangolo",
             DrawTool.TEXT: "Testo",
-            DrawTool.CONE: "Cono",
-            DrawTool.ZOOM: "Zoom",
             DrawTool.PENCIL: "Matita",
             DrawTool.CURVED_LINE: "Linea curva",
             DrawTool.CURVED_ARROW: "Freccia curva",
@@ -282,7 +303,7 @@ class MainWindow(QMainWindow):
         }
         for tool in [
             DrawTool.CIRCLE, DrawTool.ARROW, DrawTool.LINE, DrawTool.RECTANGLE,
-            DrawTool.TEXT, DrawTool.CONE, DrawTool.ZOOM, DrawTool.PENCIL,
+            DrawTool.TEXT, DrawTool.PENCIL,
             DrawTool.CURVED_LINE, DrawTool.CURVED_ARROW, DrawTool.PARABOLA_ARROW,
             DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW, DrawTool.DOUBLE_ARROW, DrawTool.DASHED_LINE,
         ]:
@@ -379,8 +400,12 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         self.video_player.positionChanged.connect(self._on_position_changed)
         self.video_player.durationChanged.connect(self._on_duration_changed)
+        self.video_player.playbackStateChanged.connect(self._on_playback_state_changed)
         self.video_player.installEventFilter(self)
         self.drawing_overlay.drawingStarted.connect(self._on_drawing_started)
+        self.drawing_overlay.drawingConfirmed.connect(self._on_drawing_confirmed)
+        self.drawing_overlay.annotationDeleted.connect(self._on_annotation_deleted)
+        self.drawing_overlay.annotationModified.connect(self._on_annotation_modified)
         self.drawing_overlay.zoomRequested.connect(self._on_zoom_requested)
 
     def eventFilter(self, obj, event):
@@ -406,6 +431,8 @@ class MainWindow(QMainWindow):
         self._update_timeline_events()
 
     def _on_position_changed(self, ms):
+        last = self._last_position_ms
+        self._last_position_ms = ms
         self.position_slider.blockSignals(True)
         self.position_slider.setValue(ms)
         self.position_slider.blockSignals(False)
@@ -415,6 +442,77 @@ class MainWindow(QMainWindow):
             f"{ms // 60000}:{(ms % 60000) // 1000:02d} / "
             f"{d // 60000}:{(d % 60000) // 1000:02d}"
         )
+        if self.video_player.state() == 1:
+            evt = self._get_event_reached_while_playing(last, ms)
+            if evt is not None:
+                self.video_player.pause()
+                self.video_player.setPosition(evt.timestamp_ms)
+                self._last_position_ms = evt.timestamp_ms
+        self._refresh_drawings_visibility()
+
+    def _get_event_reached_while_playing(self, from_ms: int, to_ms: int):
+        """Ritorna il primo evento nel range (from_ms, to_ms], o None."""
+        if from_ms >= to_ms:
+            return None
+        events = self.event_manager.get_events()
+        for evt in events:
+            if from_ms < evt.timestamp_ms <= to_ms:
+                return evt
+        return None
+
+    def _on_playback_state_changed(self, playing: bool):
+        """Video in play: nasconde disegni. In pausa: mostra disegni per timestamp corrente."""
+        self._refresh_drawings_visibility()
+
+    def _get_annotations_at(self, ts_ms: int):
+        """Ritorna tutte le annotazioni al timestamp con event_id/ann_index per delete."""
+        result = list(self.project.get_drawings_at(ts_ms))
+        for evt in self.event_manager.get_events():
+            if evt.timestamp_ms == ts_ms and evt.annotations:
+                for i, ann in enumerate(evt.annotations):
+                    result.append({"data": ann, "event_id": evt.id, "ann_index": i})
+        return result
+
+    def _refresh_drawings_visibility(self):
+        """Aggiorna visibilità disegni: nascosti se in play, visibili se in pausa al timestamp corrente."""
+        if self.video_player.state() == 1:  # PlayingState
+            self.drawing_overlay.setDrawingsVisibility(False)
+        else:
+            pos = self.video_player.position()
+            self.drawing_overlay.loadDrawingsFromProject(self._get_annotations_at(pos))
+            self.drawing_overlay.setDrawingsVisibility(True)
+
+    def _on_annotation_modified(self, event_id: str, ann_index: int, new_data: dict):
+        """Salva modifiche (posizione, dimensioni) nell'evento."""
+        self.event_manager.update_annotation_in_event(event_id, ann_index, new_data)
+
+    def _on_annotation_deleted(self, event_id: str, ann_index: int):
+        """Rimuove annotazione da evento (chiamato da menu contestuale Elimina)."""
+        self.event_manager.remove_annotation_from_event(event_id, ann_index)
+        self._refresh_drawings_visibility()
+        self._refresh_events_list()
+
+    def _on_drawing_confirmed(self, item):
+        """Annotazione confermata: 1 evento per timestamp, tutte le annotazioni nello stesso evento."""
+        if not self.project.video_path:
+            return
+        data = self.drawing_overlay.item_to_serializable_data(item)
+        if not data:
+            return
+        ts = self.video_player.position()
+        evt = self.event_manager.get_annotazione_event_at_timestamp(ts)
+        if evt:
+            self.event_manager.add_annotation_to_event(evt.id, data)
+        else:
+            self.event_manager.add_event(
+                "annotazione",
+                ts,
+                label=f"Annotazione {ts // 1000}s",
+                annotations=[data]
+            )
+        self.drawing_overlay.removeItemForSave(item)
+        self._refresh_drawings_visibility()
+        self._refresh_events_list()
 
     def _on_drawing_started(self):
         """Freeze automatico quando si inizia a disegnare (stile Kinovea)."""
@@ -453,6 +551,34 @@ class MainWindow(QMainWindow):
     def _seek_to(self, ms: int):
         self.video_player.setPosition(ms)
 
+    def _restart_video(self):
+        """Riavvia dall'inizio e avvia la riproduzione."""
+        self.video_player.setPosition(0)
+        self._last_position_ms = 0
+        self.video_player.play()
+
+    def _go_to_prev_event(self):
+        """Vai all'evento precedente rispetto alla posizione corrente."""
+        pos = self.video_player.position()
+        events = [e for e in self.event_manager.get_events() if e.timestamp_ms < pos]
+        if not events:
+            return
+        prev_evt = max(events, key=lambda e: e.timestamp_ms)
+        self.video_player.setPosition(prev_evt.timestamp_ms)
+        self.video_player.pause()
+        self._refresh_drawings_visibility()
+
+    def _go_to_next_event(self):
+        """Vai all'evento successivo rispetto alla posizione corrente."""
+        pos = self.video_player.position()
+        events = [e for e in self.event_manager.get_events() if e.timestamp_ms > pos]
+        if not events:
+            return
+        next_evt = min(events, key=lambda e: e.timestamp_ms)
+        self.video_player.setPosition(next_evt.timestamp_ms)
+        self.video_player.pause()
+        self._refresh_drawings_visibility()
+
     def _add_event(self, event_type_id: str):
         pos = self.video_player.position()
         evt = self.event_manager.add_event(event_type_id, pos, team="home")
@@ -475,8 +601,9 @@ class MainWindow(QMainWindow):
             child = self.event_btns_grid.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
-        # Aggiungi pulsante per ogni tipo
-        for i, et in enumerate(self.event_manager.get_event_types()):
+        # Aggiungi pulsante per ogni tipo (escluso annotazione: creata automaticamente dai disegni)
+        types_to_show = [et for et in self.event_manager.get_event_types() if et.id != "annotazione"]
+        for i, et in enumerate(types_to_show):
             btn = QPushButton(et.name)
             btn.setStyleSheet(f"border-left: 4px solid {et.color};")
             btn.setProperty("event_type_id", et.id)
@@ -643,6 +770,9 @@ class MainWindow(QMainWindow):
                     Path(p).unlink()
                 except OSError:
                     pass
+            if evt.drawing_id:
+                self.project.remove_drawing(evt.drawing_id)
+                self._refresh_drawings_visibility()
             self.event_manager.remove_event(evt.id)
             self._refresh_events_list()
             self._update_timeline_events()
@@ -727,8 +857,20 @@ class MainWindow(QMainWindow):
         self.drawing_overlay.setTool(tool)
         for t, btn in self._draw_btns.items():
             btn.setChecked(t == tool)
+        if hasattr(self, "zoom_btn"):
+            self.zoom_btn.setChecked(tool == DrawTool.ZOOM)
         if tool in (DrawTool.ARROW, DrawTool.LINE):
             self.drawing_overlay.setArrowLineStyle(ArrowLineStyle.STRAIGHT)
+
+    def _toggle_zoom_tool(self):
+        """Attiva/disattiva zoom dalla riga Play/Pausa."""
+        if self.zoom_btn.isChecked():
+            self._set_draw_tool(DrawTool.ZOOM)
+        else:
+            self.drawing_overlay.setTool(DrawTool.NONE)
+            self.zoom_btn.setChecked(False)
+            for t, btn in self._draw_btns.items():
+                btn.setChecked(False)
 
     def _show_color_size_menu(self):
         menu = QMenu(self)
@@ -803,6 +945,7 @@ class MainWindow(QMainWindow):
 
     def _clear_all_for_new_video(self):
         """Ripulisce eventi, disegni e clip quando si carica un nuovo video."""
+        self._last_position_ms = 0
         self.event_manager.clear_events()
         self.drawing_overlay.clearDrawings()
         self.project.clear_playlist()

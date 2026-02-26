@@ -25,6 +25,7 @@ DEFAULT_EVENT_TYPES = [
     {"id": "corner", "name": "Corner", "icon": "🟨", "color": "#F59E0B"},
     {"id": "pass", "name": "Passaggio", "icon": "↔️", "color": "#8B5CF6"},
     {"id": "evento", "name": "Evento", "icon": "📌", "color": "#9CA3AF"},  # tipo generico per "Crea Evento"
+    {"id": "annotazione", "name": "Annotazione", "icon": "✏️", "color": "#00D9A5"},  # disegno/annotazione
 ]
 
 # Colori per disegno

@@ -1,6 +1,6 @@
 """Gestione eventi e tipi di evento."""
 from dataclasses import dataclass, field
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Any, Dict
 import json
 
 
@@ -29,6 +29,8 @@ class Event:
     description: str = ""
     team: Optional[str] = None  # "home" o "away" per statistiche
     label: Optional[str] = None  # nome personalizzato per l'evento (editabile inline)
+    drawing_id: Optional[str] = None  # id del disegno in Project.drawings (backward compat)
+    annotations: List[Dict[str, Any]] = field(default_factory=list)  # cerchi, frecce, testo, ecc.
 
     def to_dict(self):
         return {
@@ -38,11 +40,17 @@ class Event:
             "description": self.description,
             "team": self.team,
             "label": self.label,
+            "drawing_id": self.drawing_id,
+            "annotations": self.annotations,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Event":
-        return cls(**{k: v for k, v in d.items() if k in ("id", "event_type_id", "timestamp_ms", "description", "team", "label")})
+        allow = ("id", "event_type_id", "timestamp_ms", "description", "team", "label", "drawing_id", "annotations")
+        kwargs = {k: v for k, v in d.items() if k in allow}
+        if "annotations" not in kwargs:
+            kwargs["annotations"] = []
+        return cls(**kwargs)
 
 
 class EventManager:
@@ -130,6 +138,8 @@ class EventManager:
         description: str = "",
         team: Optional[str] = None,
         label: Optional[str] = None,
+        drawing_id: Optional[str] = None,
+        annotations: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Event]:
         """Aggiunge un evento."""
         if not self.get_event_type(event_type_id):
@@ -142,6 +152,8 @@ class EventManager:
             description=description,
             team=team,
             label=label,
+            drawing_id=drawing_id,
+            annotations=annotations or [],
         )
         self._events.append(evt)
         self._events.sort(key=lambda e: e.timestamp_ms)
@@ -204,6 +216,43 @@ class EventManager:
 
     def get_events_by_type(self, type_id: str) -> List[Event]:
         return [e for e in self._events if e.event_type_id == type_id]
+
+    def get_annotazione_event_at_timestamp(self, timestamp_ms: int) -> Optional[Event]:
+        """Ritorna l'evento annotazione al timestamp esatto, se esiste."""
+        return next(
+            (e for e in self._events if e.event_type_id == "annotazione" and e.timestamp_ms == timestamp_ms),
+            None
+        )
+
+    def add_annotation_to_event(self, event_id: str, annotation_data: dict) -> bool:
+        """Aggiunge un'annotazione a un evento esistente."""
+        evt = next((e for e in self._events if e.id == event_id), None)
+        if not evt:
+            return False
+        evt.annotations.append(annotation_data)
+        self._notify()
+        return True
+
+    def update_annotation_in_event(self, event_id: str, ann_index: int, annotation_data: dict) -> bool:
+        """Aggiorna un'annotazione esistente (dopo move/resize)."""
+        evt = next((e for e in self._events if e.id == event_id), None)
+        if not evt or ann_index < 0 or ann_index >= len(evt.annotations):
+            return False
+        evt.annotations[ann_index] = annotation_data
+        self._notify()
+        return True
+
+    def remove_annotation_from_event(self, event_id: str, ann_index: int) -> bool:
+        """Rimuove un'annotazione da un evento."""
+        evt = next((e for e in self._events if e.id == event_id), None)
+        if not evt or ann_index < 0 or ann_index >= len(evt.annotations):
+            return False
+        evt.annotations.pop(ann_index)
+        if not evt.annotations:
+            self.remove_event(event_id)
+        else:
+            self._notify()
+        return True
 
     def clear_events(self):
         self._events.clear()

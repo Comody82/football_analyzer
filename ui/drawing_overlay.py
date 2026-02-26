@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsTextItem, QGraphicsRectItem,
     QGraphicsPolygonItem, QGraphicsPathItem, QApplication,
-    QInputDialog, QColorDialog, QMenu, QShortcut
+    QInputDialog, QColorDialog, QFontDialog, QMenu, QShortcut
 )
 from PyQt5.QtGui import (
     QPen, QBrush, QColor, QPainter, QPolygonF, QFont,
@@ -11,7 +11,7 @@ from PyQt5.QtGui import (
     QKeySequence, QTransform
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF, pyqtSignal
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 from enum import Enum
 import math
 
@@ -701,14 +701,14 @@ class DrawableParabolaArrow(QGraphicsPathItem):
 
 
 class DrawableText(QGraphicsTextItem):
-    """Testo disegnabile: QGraphicsTextItem, editabile subito, 24px, bianco."""
+    """Testo disegnabile: selezionabile, trascinabile, doppio clic per modificare."""
     def __init__(self, text: str = "", color: QColor = Qt.white):
         super().__init__(text)
         self.setDefaultTextColor(color)
         self.setFlag(self.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(self.GraphicsItemFlag.ItemIsFocusable)
-        self.setTextInteractionFlags(Qt.TextEditorInteraction)
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
         font = QFont("Segoe UI", 24, QFont.Bold)
         self.setFont(font)
         self._color = color
@@ -716,6 +716,27 @@ class DrawableText(QGraphicsTextItem):
     def setDrawColor(self, c: QColor):
         self._color = c
         self.setDefaultTextColor(c)
+
+    def focusOutEvent(self, event):
+        """Terminata modifica: torna selezionabile/trascinabile."""
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        cb = getattr(self, "_confirm_callback", None)
+        if callable(cb):
+            cb()
+        super().focusOutEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        """Doppio clic: abilita modifica testo."""
+        self.setTextInteractionFlags(Qt.TextEditorInteraction)
+        self.setFocus(Qt.MouseFocusReason)
+        super().mouseDoubleClickEvent(event)
+
+    def paint(self, painter, option, widget):
+        super().paint(painter, option, widget)
+        if self.isSelected() and self.textInteractionFlags() == Qt.NoTextInteraction:
+            painter.setPen(QPen(QColor(255, 255, 255), 3, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self.boundingRect())
 
 
 class DrawableFreehand(QGraphicsPathItem):
@@ -797,11 +818,84 @@ class DrawableCone(QGraphicsPolygonItem):
             painter.drawPolygon(self.polygon())
 
 
+def _serialize_point(p: QPointF) -> Dict[str, float]:
+    return {"x": float(p.x()), "y": float(p.y())}
+
+
+def _deserialize_point(d: dict) -> QPointF:
+    return QPointF(d.get("x", 0), d.get("y", 0))
+
+
+def _serialize_rect(r: QRectF) -> Dict[str, float]:
+    return {"x": float(r.x()), "y": float(r.y()), "w": float(r.width()), "h": float(r.height())}
+
+
+def _deserialize_rect(d: dict) -> QRectF:
+    return QRectF(d.get("x", 0), d.get("y", 0), d.get("w", 0), d.get("h", 0))
+
+
+def _serialize_color(c: QColor) -> str:
+    return c.name()
+
+
+def _deserialize_color(s: str) -> QColor:
+    return QColor(s)
+
+
+def _serialize_path(path: QPainterPath) -> list:
+    """Serializza QPainterPath come lista di comandi JSON-serializzabili."""
+    out = []
+    for i in range(path.elementCount()):
+        el = path.elementAt(i)
+        if el.isMoveTo():
+            out.append({"t": "M", "x": el.x, "y": el.y})
+        elif el.isLineTo():
+            out.append({"t": "L", "x": el.x, "y": el.y})
+        elif el.isCurveTo():
+            out.append({"t": "C", "x": el.x, "y": el.y})
+        else:
+            out.append({"t": "D", "x": el.x, "y": el.y})
+    return out
+
+
+def _deserialize_path(cmds: list) -> QPainterPath:
+    path = QPainterPath()
+    ctrl_pts = []
+    for cmd in cmds:
+        t, x, y = cmd.get("t"), cmd.get("x", 0), cmd.get("y", 0)
+        if t == "M":
+            path.moveTo(x, y)
+            ctrl_pts = []
+        elif t == "L":
+            path.lineTo(x, y)
+            ctrl_pts = []
+        elif t == "C":
+            ctrl_pts.append(QPointF(x, y))
+            if len(ctrl_pts) == 3:
+                path.cubicTo(ctrl_pts[0], ctrl_pts[1], ctrl_pts[2])
+                ctrl_pts = []
+        elif t == "D":
+            ctrl_pts.append(QPointF(x, y))
+    return path
+
+
+def _serialize_font(f: QFont) -> dict:
+    return {"family": f.family(), "pointSize": f.pointSize(), "weight": f.weight()}
+
+
+def _deserialize_font(d: dict) -> QFont:
+    font = QFont(d.get("family", "Segoe UI"), d.get("pointSize", 24), d.get("weight", QFont.Bold))
+    return font
+
+
 class DrawingOverlay(QGraphicsView):
     """Widget overlay trasparente per disegnare sul video - stile Kinovea."""
     drawingAdded = pyqtSignal(object)
+    drawingConfirmed = pyqtSignal(object)  # Emesso quando annotazione confermata (da salvare come evento)
     drawingStarted = pyqtSignal()  # Emesso quando inizia il disegno (per freeze video)
     zoomRequested = pyqtSignal(int, int, int)  # delta, mouse_x, mouse_y (in coords overlay)
+    annotationDeleted = pyqtSignal(str, int)  # event_id, ann_index (per displayed items)
+    annotationModified = pyqtSignal(str, int, object)  # event_id, ann_index, new_data (dopo move/resize)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -822,6 +916,7 @@ class DrawingOverlay(QGraphicsView):
         self._start_pos: Optional[QPointF] = None
         self._current_item = None
         self._items: List[object] = []
+        self._displayed_items: List[object] = []  # disegni caricati da project per timestamp corrente
         self._resize_handles: List[ResizeHandle] = []
         self._resize_target_item = None
         self._resize_drag_handle_index: Optional[int] = None
@@ -833,6 +928,7 @@ class DrawingOverlay(QGraphicsView):
         self._is_moving = False
         self._move_start_scene = None
         self._move_start_item_pos = None
+        self._move_target_item = None  # item in trascinamento (testo o forma con maniglie)
 
         sc_copy = QShortcut(QKeySequence.Copy, self, self._copy_selected)
         sc_paste = QShortcut(QKeySequence.Paste, self, self._paste)
@@ -888,6 +984,57 @@ class DrawingOverlay(QGraphicsView):
             self.drawingAdded.emit(new_item)
             self._select_shape(new_item)
 
+    def item_to_serializable_data(self, item) -> Optional[dict]:
+        """Converte item overlay in dict JSON-serializzabile per DrawingItem.data."""
+        raw = self._item_to_copy_data(item)
+        if not raw:
+            return None
+        return self._copy_data_to_serializable(raw)
+
+    def _copy_data_to_serializable(self, data: dict) -> dict:
+        """Converte copy_data (Qt types) in dict serializzabile."""
+        out = {}
+        for k, v in data.items():
+            if isinstance(v, QPointF):
+                out[k] = _serialize_point(v)
+            elif isinstance(v, QRectF):
+                out[k] = _serialize_rect(v)
+            elif isinstance(v, QColor):
+                out[k] = _serialize_color(v)
+            elif isinstance(v, QFont):
+                out[k] = _serialize_font(v)
+            elif isinstance(v, QPainterPath):
+                out[k] = _serialize_path(v)
+            elif isinstance(v, (list, tuple)) and v and isinstance(v[0], QPointF):
+                out[k] = [_serialize_point(p) for p in v]
+            elif hasattr(v, "value"):  # ArrowLineStyle enum
+                out[k] = v.value if hasattr(v, "value") else str(v)
+            else:
+                out[k] = v
+        return out
+
+    def _serializable_to_copy_data(self, data: dict) -> dict:
+        """Converte dict serializzato in copy_data (Qt types) per _copy_data_to_item."""
+        out = {}
+        for k, v in data.items():
+            if k in ("pos", "p1", "p2", "ctrl") and isinstance(v, dict):
+                out[k] = _deserialize_point(v)
+            elif k == "rect" and isinstance(v, dict):
+                out[k] = _deserialize_rect(v)
+            elif k == "color" and isinstance(v, str):
+                out[k] = _deserialize_color(v)
+            elif k == "font" and isinstance(v, dict):
+                out[k] = _deserialize_font(v)
+            elif k == "path" and isinstance(v, list):
+                out[k] = _deserialize_path(v)
+            elif k == "points" and isinstance(v, list):
+                out[k] = [_deserialize_point(p) if isinstance(p, dict) else p for p in v]
+            elif k == "style" and isinstance(v, str):
+                out[k] = next((s for s in ArrowLineStyle if s.value == v), ArrowLineStyle.STRAIGHT)
+            else:
+                out[k] = v
+        return out
+
     def _item_to_copy_data(self, item) -> Optional[dict]:
         """Estrae dati serializzabili dalla forma per la clipboard."""
         pos = item.scenePos()
@@ -912,7 +1059,7 @@ class DrawingOverlay(QGraphicsView):
             poly = [QPointF(p) for p in item.polygon()]
             return {"type": "cone", "points": poly, "pos": pos, "color": item._color}
         if isinstance(item, DrawableText):
-            return {"type": "text", "text": item.toPlainText(), "pos": pos, "color": item._color}
+            return {"type": "text", "text": item.toPlainText(), "pos": pos, "color": item._color, "font": item.font()}
         if isinstance(item, DrawableFreehand):
             return {"type": "freehand", "path": QPainterPath(item.path()), "pos": pos,
                     "color": item._color, "pen_width": item.pen().width()}
@@ -964,6 +1111,8 @@ class DrawingOverlay(QGraphicsView):
             return item
         if t == "text":
             item = DrawableText(data.get("text", ""), data["color"])
+            if "font" in data and data["font"]:
+                item.setFont(data["font"])
             item.setPos(new_pos)
             return item
         if t == "freehand":
@@ -1022,6 +1171,11 @@ class DrawingOverlay(QGraphicsView):
         """Notifica l'inizio del disegno per il freeze del video."""
         self.drawingStarted.emit()
 
+    def _emit_text_confirmed(self, item):
+        """Chiamato da DrawableText.focusOutEvent quando la modifica è terminata."""
+        if item in self._items:
+            self.drawingConfirmed.emit(item)
+
     def wheelEvent(self, event: QWheelEvent):
         """Con strumento Zoom attivo: zoom continuo (max 5x) via rotella verso il puntatore."""
         if self._tool == DrawTool.ZOOM:
@@ -1050,12 +1204,17 @@ class DrawingOverlay(QGraphicsView):
                 return
             # Se clicchi sul bordo di una forma
             hit_item = self._get_item_at_border(scene_pos)
-            if hit_item is not None and hit_item in self._items:
-                if hit_item == self._resize_target_item:
-                    # Forma già selezionata: inizia trascinamento per spostare
+            if hit_item is not None and (hit_item in self._items or hit_item in self._displayed_items):
+                # Forma già selezionata: inizia trascinamento per spostare
+                is_selected_for_move = (
+                    hit_item == self._resize_target_item or
+                    (isinstance(hit_item, DrawableText) and hit_item == self._selected_shape)
+                )
+                if is_selected_for_move:
                     self._is_moving = True
                     self._move_start_scene = scene_pos
                     self._move_start_item_pos = hit_item.scenePos()
+                    self._move_target_item = hit_item
                     event.accept()
                     return
                 # Altra forma: seleziona
@@ -1066,12 +1225,15 @@ class DrawingOverlay(QGraphicsView):
             self._deselect_shape()
             self._resize_drag_handle_index = None
             self._is_moving = False
+            self._move_target_item = None
         if event.button() == Qt.LeftButton and self._tool == DrawTool.TEXT:
             scene_pos = self.mapToScene(event.pos())
             self._clear_resize_handles()
             self._start_freeze()
             item = DrawableText("", QColor(Qt.white))
             item.setPos(scene_pos)
+            item.setTextInteractionFlags(Qt.TextEditorInteraction)
+            item._confirm_callback = lambda it=item: self._emit_text_confirmed(it)
             self.scene().addItem(item)
             self._items.append(item)
             self.drawingAdded.emit(item)
@@ -1096,24 +1258,33 @@ class DrawingOverlay(QGraphicsView):
     def _show_context_menu(self, pos, item):
         """Menu contestuale sul tasto destro."""
         target = self._find_drawable_item(item)
-        if target is None or target not in self._items:
+        if target is None or (target not in self._items and target not in self._displayed_items):
             return
         menu = QMenu(self)
         color_action = menu.addAction("Modifica colore")
         has_line = isinstance(target, (DrawableCircle, DrawableRectangle, DrawableArrow,
                                        DrawableLine, DrawableFreehand,
                                        DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow))
-        thickness_action = menu.addAction("Modifica spessore linea")
-        if not has_line:
-            thickness_action.setEnabled(False)
+        thickness_action = menu.addAction("Modifica spessore linea") if has_line else None
+        is_text = isinstance(target, DrawableText)
+        font_action = menu.addAction("Modifica font")
+        font_size_action = menu.addAction("Modifica dimensione testo")
+        if not is_text:
+            font_action.setEnabled(False)
+            font_size_action.setEnabled(False)
         menu.addSeparator()
         duplica_action = menu.addAction("Duplica")
         menu.addSeparator()
         delete_action = menu.addAction("Elimina")
         action = menu.exec_(pos)
         if action == delete_action:
+            ref = target.data(Qt.UserRole) if hasattr(target, "data") else None
+            if isinstance(ref, dict) and "event_id" in ref and "ann_index" in ref:
+                self.annotationDeleted.emit(ref["event_id"], ref["ann_index"])
             if target in self._items:
                 self._items.remove(target)
+            if target in self._displayed_items:
+                self._displayed_items.remove(target)
             self._safe_remove_item(target)
             self._clear_resize_handles()
         elif action == color_action:
@@ -1122,6 +1293,7 @@ class DrawingOverlay(QGraphicsView):
                 target.setDrawColor(c)
                 target._color = c
                 target.update()
+                self._persist_displayed_item_if_needed(target)
         elif action == thickness_action and has_line:
             if isinstance(target, (DrawableArrow, DrawableLine)):
                 current = target._width
@@ -1141,6 +1313,22 @@ class DrawingOverlay(QGraphicsView):
                     color = target._color if hasattr(target, "_color") else target.pen().color()
                     target.setPen(QPen(color, w))
                 target.update()
+                self._persist_displayed_item_if_needed(target)
+        elif action == font_action and is_text:
+            f, ok = QFontDialog.getFont(target.font(), self, "Modifica font")
+            if ok:
+                target.setFont(f)
+                target.update()
+                self._persist_displayed_item_if_needed(target)
+        elif action == font_size_action and is_text:
+            f = target.font()
+            current = f.pointSize()
+            w, ok = QInputDialog.getInt(self, "Modifica dimensione testo", "Dimensione (pt):", current, 8, 120)
+            if ok and w > 0:
+                f.setPointSize(w)
+                target.setFont(f)
+                target.update()
+                self._persist_displayed_item_if_needed(target)
         elif action == duplica_action:
             data = self._item_to_copy_data(target)
             if data:
@@ -1151,12 +1339,22 @@ class DrawingOverlay(QGraphicsView):
                     self.drawingAdded.emit(new_item)
                     self._select_shape(new_item)
 
+    def _persist_displayed_item_if_needed(self, item):
+        """Salva modifiche nell'evento se l'item è un'annotazione caricata (displayed)."""
+        if item not in self._displayed_items:
+            return
+        ref = item.data(Qt.UserRole) if hasattr(item, "data") else None
+        if isinstance(ref, dict) and "event_id" in ref and "ann_index" in ref:
+            new_data = self.item_to_serializable_data(item)
+            if new_data:
+                self.annotationModified.emit(ref["event_id"], ref["ann_index"], new_data)
+
     def _find_drawable_item(self, item):
         """Trova l'item disegnabile (può essere sotto altri o un figlio)."""
         if item is None:
             return None
         while item is not None:
-            if item in self._items:
+            if item in self._items or item in self._displayed_items:
                 return item
             item = item.parentItem()
         return None
@@ -1177,7 +1375,12 @@ class DrawingOverlay(QGraphicsView):
         return [p1, p2]
 
     def _enter_resize_mode(self, item):
-        """Attiva modalità ridimensionamento con maniglie (angoli + lati)."""
+        """Attiva modalità ridimensionamento con maniglie (angoli + lati). Testo: solo selezione."""
+        if isinstance(item, DrawableText):
+            self._resize_target_item = None
+            item.setSelected(True)
+            self._selected_shape = item
+            return
         if not isinstance(item, (QGraphicsEllipseItem, QGraphicsRectItem, DrawableCircle, DrawableRectangle,
                                  DrawableArrow, DrawableLine, DrawableCone, DrawableFreehand,
                                  DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
@@ -1346,15 +1549,16 @@ class DrawingOverlay(QGraphicsView):
                 self._reposition_resize_handles()
 
     def mouseMoveEvent(self, event):
-        # Trascinamento per spostare la forma
-        if self._is_moving and self._resize_target_item:
+        # Trascinamento per spostare la forma (o il testo)
+        if self._is_moving and self._move_target_item:
             scene_pos = self.mapToScene(event.pos())
             delta = scene_pos - self._move_start_scene
             new_pos = self._move_start_item_pos + delta
-            self._resize_target_item.setPos(new_pos)
+            self._move_target_item.setPos(new_pos)
             self._move_start_scene = scene_pos
             self._move_start_item_pos = new_pos
-            self._reposition_resize_handles()
+            if self._resize_target_item:
+                self._reposition_resize_handles()
             event.accept()
             return
         # Ridimensionamento in corso: aggiorna l'oggetto
@@ -1426,10 +1630,19 @@ class DrawingOverlay(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            if self._move_target_item is not None or self._resize_target_item is not None:
+                modified_item = self._move_target_item or self._resize_target_item
+                if modified_item in self._displayed_items:
+                    ref = modified_item.data(Qt.UserRole) if hasattr(modified_item, "data") else None
+                    if isinstance(ref, dict) and "event_id" in ref and "ann_index" in ref:
+                        new_data = self.item_to_serializable_data(modified_item)
+                        if new_data:
+                            self.annotationModified.emit(ref["event_id"], ref["ann_index"], new_data)
             self._resize_drag_handle_index = None
             self._resize_freehand_start_rect = None
             self._resize_freehand_start_path = None
             self._is_moving = False
+            self._move_target_item = None
         if event.button() == Qt.LeftButton and self._start_pos:
             pos = self.mapToScene(event.pos())
             style, is_arrow, head_at_start = _get_arrow_line_tool_params(self._tool, self._arrow_line_style)
@@ -1444,6 +1657,7 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
             elif self._tool in (DrawTool.LINE, DrawTool.DASHED_LINE) and self._current_item:
                 item = DrawableLine(
@@ -1456,6 +1670,7 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
             elif self._tool == DrawTool.CIRCLE and self._current_item:
                 r = QRectF(self._start_pos, pos).normalized()
@@ -1464,6 +1679,7 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
             elif self._tool == DrawTool.RECTANGLE and self._current_item:
                 r = QRectF(self._start_pos, pos).normalized()
@@ -1472,10 +1688,12 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
             elif self._tool == DrawTool.CONE and self._current_item:
                 self._items.append(self._current_item)
                 self.drawingAdded.emit(self._current_item)
+                self.drawingConfirmed.emit(self._current_item)
                 self._current_item = None
             elif self._tool == DrawTool.CURVED_LINE and self._current_item:
                 p1, p2 = self._start_pos, pos
@@ -1485,6 +1703,7 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
             elif self._tool == DrawTool.CURVED_ARROW and self._current_item:
                 p1, p2 = self._start_pos, pos
@@ -1494,6 +1713,7 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
             elif self._tool == DrawTool.PARABOLA_ARROW and self._current_item:
                 p1, p2 = self._start_pos, pos
@@ -1506,6 +1726,7 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
             elif self._tool == DrawTool.PENCIL and self._pencil_path is not None and self._pencil_path.length() > 2:
                 item = DrawableFreehand(QPainterPath(self._pencil_path), self._color, self._pen_width)
@@ -1513,6 +1734,7 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._items.append(item)
                 self.drawingAdded.emit(item)
+                self.drawingConfirmed.emit(item)
                 self._current_item = None
                 self._pencil_path = None
             else:
@@ -1556,6 +1778,56 @@ class DrawingOverlay(QGraphicsView):
         for item in self._items[:]:
             self._safe_remove_item(item)
             self._items.remove(item)
+        self._clear_displayed_items()
+
+    def _clear_displayed_items(self):
+        """Rimuove i disegni caricati da project (layer salvato)."""
+        for item in self._displayed_items[:]:
+            if item in self._items:
+                self._items.remove(item)
+            self._safe_remove_item(item)
+            self._displayed_items.remove(item)
+
+    def setDrawingsVisibility(self, visible: bool):
+        """Mostra/nascondi tutti i disegni (working + displayed) - usato quando video in play."""
+        for item in self._items + self._displayed_items:
+            item.setVisible(visible)
+
+    def loadDrawingsFromProject(self, drawings_list):
+        """Carica i disegni da lista di DrawingItem o dict (annotazioni) per il timestamp corrente.
+        Gli item sono editabili (selectable, movable) quando video in pausa.
+        drawings_list può contenere: dict con type, oppure dict con data/event_id/ann_index."""
+        self._clear_displayed_items()
+        for d in drawings_list:
+            event_id, ann_index = None, None
+            if hasattr(d, "data") and d.data:
+                raw = d.data
+            elif isinstance(d, dict):
+                raw = d.get("data") or d
+                event_id = d.get("event_id")
+                ann_index = d.get("ann_index")
+                if not raw or not raw.get("type"):
+                    continue
+            else:
+                continue
+            data = self._serializable_to_copy_data(raw)
+            data["pos"] = data.get("pos", _deserialize_point({"x": 0, "y": 0}))
+            item = self._copy_data_to_item(data, offset_x=0, offset_y=0)
+            if item:
+                if event_id is not None and ann_index is not None:
+                    item.setData(Qt.UserRole, {"event_id": event_id, "ann_index": ann_index})
+                item.setFlag(item.GraphicsItemFlag.ItemIsMovable, True)
+                item.setFlag(item.GraphicsItemFlag.ItemIsSelectable, True)
+                self.scene().addItem(item)
+                self._displayed_items.append(item)
+                self._items.append(item)
+
+    def removeItemForSave(self, item):
+        """Rimuove item da _items dopo averlo salvato in project (verrà mostrato da loadDrawingsFromProject)."""
+        if item in self._items:
+            self._items.remove(item)
+            self._safe_remove_item(item)
+            self._clear_resize_handles()
 
     def removeSelected(self):
         for item in self.scene().selectedItems():
