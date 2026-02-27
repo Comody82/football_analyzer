@@ -90,6 +90,14 @@ def get_stylesheet() -> str:
         padding: 4px 8px;
     }}
 
+    /* clip-actions: flex 0 0 auto, white-space nowrap, no compression */
+    #clipCard QPushButton#btnPlay,
+    #clipCard QPushButton#btnEdit,
+    #clipCardPlaying QPushButton#btnPlay,
+    #clipCardPlaying QPushButton#btnEdit {{
+        min-width: 90px;
+    }}
+
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
         background-color: {BG_CARD};
         color: {TEXT_PRIMARY};

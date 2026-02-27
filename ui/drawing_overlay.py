@@ -33,6 +33,13 @@ class DrawTool(Enum):
     ZIGZAG_ARROW = "zigzag_arrow"  # freccia zigzag
     DOUBLE_ARROW = "double_arrow"  # freccia doppia punta
     DASHED_LINE = "dashed_line"  # linea tratteggiata
+    POLYGON = "polygon"
+
+
+class PolygonFillStyle(Enum):
+    """Stile riempimento poligono."""
+    SOLID = "solid"      # trasparente con opacità
+    STRIPES = "stripes"  # righe diagonali (match analysis)
 
 
 class ArrowLineStyle(Enum):
@@ -818,6 +825,76 @@ class DrawableCone(QGraphicsPolygonItem):
             painter.drawPolygon(self.polygon())
 
 
+class DrawablePolygon(QGraphicsPolygonItem):
+    """Poligono per zone (match analysis). Fill trasparente o a righe diagonali."""
+    def __init__(self, points: List[QPointF], color: QColor = Qt.yellow,
+                 fill_style: PolygonFillStyle = PolygonFillStyle.SOLID, opacity: float = 0.4):
+        poly = QPolygonF(points)
+        super().__init__(poly)
+        self._color = color
+        self._fill_style = fill_style
+        self._opacity = max(0.2, min(0.6, opacity))
+        self.setPen(QPen(color, 2))
+        self._update_brush()
+        self.setFlag(self.GraphicsItemFlag.ItemIsMovable)
+        self.setFlag(self.GraphicsItemFlag.ItemIsSelectable)
+
+    def _update_brush(self):
+        alpha = int(self._opacity * 255)
+        if self._fill_style == PolygonFillStyle.SOLID:
+            fill_color = QColor(self._color.red(), self._color.green(), self._color.blue(), alpha)
+            self.setBrush(QBrush(fill_color))
+        else:
+            self.setBrush(QBrush(Qt.NoBrush))
+
+    def paint(self, painter, option, widget):
+        if self._fill_style == PolygonFillStyle.SOLID:
+            super().paint(painter, option, widget)
+        else:
+            painter.setPen(self.pen())
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPolygon(self.polygon())
+            self._paint_stripes(painter)
+        if self.isSelected():
+            painter.setPen(QPen(QColor(255, 255, 255), 3, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPolygon(self.polygon())
+
+    def _paint_stripes(self, painter):
+        """Righe diagonali 45° (stile match analysis)."""
+        painter.save()
+        poly = self.polygon()
+        br = poly.boundingRect()
+        alpha = int(self._opacity * 255)
+        stripe_color = QColor(self._color.red(), self._color.green(), self._color.blue(), alpha)
+        painter.setPen(QPen(stripe_color, 2))
+        path = QPainterPath()
+        path.addPolygon(poly)
+        painter.setClipPath(path)
+        step = 10
+        diag = math.sqrt(br.width()**2 + br.height()**2)
+        n = int(diag / step) + 2
+        for i in range(-n, n + 1):
+            off = i * step
+            p1 = QPointF(br.left() - diag, br.top() + off)
+            p2 = QPointF(br.right() + diag, br.top() + off + diag)
+            painter.drawLine(p1, p2)
+        painter.restore()
+
+    def setDrawColor(self, c: QColor):
+        self._color = c
+        self.setPen(QPen(c, self.pen().width()))
+        self._update_brush()
+
+    def setFillStyle(self, style: PolygonFillStyle):
+        self._fill_style = style
+        self._update_brush()
+
+    def setOpacity(self, opacity: float):
+        self._opacity = max(0.2, min(0.6, opacity))
+        self._update_brush()
+
+
 def _serialize_point(p: QPointF) -> Dict[str, float]:
     return {"x": float(p.x()), "y": float(p.y())}
 
@@ -923,6 +1000,10 @@ class DrawingOverlay(QGraphicsView):
         self._resize_freehand_start_rect: Optional[QRectF] = None  # BBox originale al drag start
         self._resize_freehand_start_path: Optional[QPainterPath] = None  # Path originale al drag start
         self._pencil_path: Optional[QPainterPath] = None  # per disegno mano libera
+        self._polygon_points: List[QPointF] = []  # vertici in costruzione (strumento Poligono)
+        self._polygon_preview_item: Optional[QGraphicsPathItem] = None  # preview durante costruzione
+        self._polygon_fill_style = PolygonFillStyle.SOLID
+        self._polygon_opacity = 0.4
         self._selected_shape = None  # forma selezionata (mostra maniglie e bordo)
         self._clipboard_item = None  # dati per Copia/Incolla
         self._is_moving = False
@@ -1031,6 +1112,8 @@ class DrawingOverlay(QGraphicsView):
                 out[k] = [_deserialize_point(p) if isinstance(p, dict) else p for p in v]
             elif k == "style" and isinstance(v, str):
                 out[k] = next((s for s in ArrowLineStyle if s.value == v), ArrowLineStyle.STRAIGHT)
+            elif k == "fill_style" and isinstance(v, str):
+                out[k] = PolygonFillStyle(v) if v in (e.value for e in PolygonFillStyle) else PolygonFillStyle.SOLID
             else:
                 out[k] = v
         return out
@@ -1058,6 +1141,10 @@ class DrawingOverlay(QGraphicsView):
         if isinstance(item, DrawableCone):
             poly = [QPointF(p) for p in item.polygon()]
             return {"type": "cone", "points": poly, "pos": pos, "color": item._color}
+        if isinstance(item, DrawablePolygon):
+            poly = [QPointF(p) for p in item.polygon()]
+            return {"type": "polygon", "points": poly, "pos": pos, "color": item._color,
+                    "fill_style": item._fill_style.value, "opacity": item._opacity}
         if isinstance(item, DrawableText):
             return {"type": "text", "text": item.toPlainText(), "pos": pos, "color": item._color, "font": item.font()}
         if isinstance(item, DrawableFreehand):
@@ -1109,6 +1196,15 @@ class DrawingOverlay(QGraphicsView):
             item = DrawableCone(data["points"], data["color"])
             item.setPos(new_pos)
             return item
+        if t == "polygon":
+            pts = data.get("points", [])
+            if pts and isinstance(pts[0], dict):
+                pts = [_deserialize_point(p) for p in pts]
+            pts = [QPointF(p.x() + offset_x, p.y() + offset_y) for p in pts]
+            style = PolygonFillStyle(data.get("fill_style", "solid"))
+            item = DrawablePolygon(pts, data["color"], style, data.get("opacity", 0.4))
+            item.setPos(0, 0)
+            return item
         if t == "text":
             item = DrawableText(data.get("text", ""), data["color"])
             if "font" in data and data["font"]:
@@ -1151,6 +1247,8 @@ class DrawingOverlay(QGraphicsView):
         self._tool = tool
         self._start_pos = None
         self._pencil_path = None
+        self._polygon_points = []
+        self._remove_polygon_preview()
         self._safe_remove_item(self._current_item)
         self._current_item = None
         self._clear_resize_handles()
@@ -1221,11 +1319,27 @@ class DrawingOverlay(QGraphicsView):
                 self._select_shape(hit_item)
                 event.accept()
                 return
-            # Clic fuori: deseleziona
-            self._deselect_shape()
-            self._resize_drag_handle_index = None
-            self._is_moving = False
-            self._move_target_item = None
+            # Clic fuori: deseleziona (ma non se stiamo costruendo un poligono)
+            if self._tool != DrawTool.POLYGON or not self._polygon_points:
+                self._deselect_shape()
+                self._resize_drag_handle_index = None
+                self._is_moving = False
+                self._move_target_item = None
+        if event.button() == Qt.LeftButton and self._tool == DrawTool.POLYGON:
+            scene_pos = self.mapToScene(event.pos())
+            self._start_freeze()
+            CLOSE_TOLERANCE = 15
+            if len(self._polygon_points) >= 3:
+                first = self._polygon_points[0]
+                dist = math.sqrt((scene_pos.x() - first.x())**2 + (scene_pos.y() - first.y())**2)
+                if dist <= CLOSE_TOLERANCE:
+                    self._finish_polygon()
+                    event.accept()
+                    return
+            self._polygon_points.append(QPointF(scene_pos))
+            self._update_polygon_preview(None)  # senza cursore; linea al cursore in mouseMove
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._tool == DrawTool.TEXT:
             scene_pos = self.mapToScene(event.pos())
             self._clear_resize_handles()
@@ -1241,7 +1355,7 @@ class DrawingOverlay(QGraphicsView):
             self.setFocus()
             event.accept()
             return
-        if event.button() == Qt.LeftButton and self._tool not in (DrawTool.NONE, DrawTool.ZOOM):
+        if event.button() == Qt.LeftButton and self._tool not in (DrawTool.NONE, DrawTool.ZOOM, DrawTool.POLYGON):
             scene_pos = self.mapToScene(event.pos())
             self._clear_resize_handles()
             self._start_pos = scene_pos
@@ -1255,6 +1369,55 @@ class DrawingOverlay(QGraphicsView):
             return
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self, event):
+        """Doppio clic con strumento Poligono: chiude il poligono."""
+        if event.button() == Qt.LeftButton and self._tool == DrawTool.POLYGON and len(self._polygon_points) >= 3:
+            self._finish_polygon()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _remove_polygon_preview(self):
+        """Rimuove l'item di preview del poligono dalla scena."""
+        self._safe_remove_item(self._polygon_preview_item)
+        self._polygon_preview_item = None
+
+    def _update_polygon_preview(self, mouse_scene_pos: Optional[QPointF] = None):
+        """Aggiorna la preview: linee tra i vertici e linea fino al cursore (se fornito)."""
+        self._remove_polygon_preview()
+        if not self._polygon_points:
+            return
+        path = QPainterPath()
+        path.moveTo(self._polygon_points[0])
+        for i in range(1, len(self._polygon_points)):
+            path.lineTo(self._polygon_points[i])
+        if mouse_scene_pos is not None:
+            path.lineTo(mouse_scene_pos)
+        self._polygon_preview_item = QGraphicsPathItem(path)
+        self._polygon_preview_item.setPen(QPen(self._color, self._pen_width))
+        self._polygon_preview_item.setBrush(QBrush(Qt.NoBrush))
+        self._polygon_preview_item.setZValue(-1)  # sotto gli altri elementi
+        self.scene().addItem(self._polygon_preview_item)
+
+    def _finish_polygon(self):
+        """Chiude il poligono in costruzione e lo salva come annotazione."""
+        if len(self._polygon_points) < 3:
+            self._polygon_points = []
+            self._remove_polygon_preview()
+            return
+        self._remove_polygon_preview()
+        pts = [QPointF(p) for p in self._polygon_points]
+        poly = DrawablePolygon(pts, self._color)
+        poly.setFillStyle(self._polygon_fill_style)
+        poly.setOpacity(self._polygon_opacity)
+        poly.setPos(0, 0)  # punti già in coordinate scena
+        self.scene().addItem(poly)
+        self._items.append(poly)
+        self.drawingAdded.emit(poly)
+        self.drawingConfirmed.emit(poly)
+        self._polygon_points = []
+        self._remove_polygon_preview()
+
     def _show_context_menu(self, pos, item):
         """Menu contestuale sul tasto destro."""
         target = self._find_drawable_item(item)
@@ -1266,18 +1429,34 @@ class DrawingOverlay(QGraphicsView):
                                        DrawableLine, DrawableFreehand,
                                        DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow))
         thickness_action = menu.addAction("Modifica spessore linea") if has_line else None
+        is_polygon = isinstance(target, DrawablePolygon)
+        fill_solid_action = menu.addAction("Fill pieno trasparente") if is_polygon else None
+        fill_stripes_action = menu.addAction("Fill a righe") if is_polygon else None
+        opacity_action = menu.addAction("Opacità...") if is_polygon else None
         is_text = isinstance(target, DrawableText)
-        font_action = menu.addAction("Modifica font")
-        font_size_action = menu.addAction("Modifica dimensione testo")
-        if not is_text:
-            font_action.setEnabled(False)
-            font_size_action.setEnabled(False)
+        font_action = menu.addAction("Modifica font") if is_text else None
+        font_size_action = menu.addAction("Modifica dimensione testo") if is_text else None
         menu.addSeparator()
         duplica_action = menu.addAction("Duplica")
         menu.addSeparator()
         delete_action = menu.addAction("Elimina")
         action = menu.exec_(pos)
-        if action == delete_action:
+        if action == fill_solid_action and is_polygon:
+            target.setFillStyle(PolygonFillStyle.SOLID)
+            target.update()
+            self._persist_displayed_item_if_needed(target)
+        elif action == fill_stripes_action and is_polygon:
+            target.setFillStyle(PolygonFillStyle.STRIPES)
+            target.update()
+            self._persist_displayed_item_if_needed(target)
+        elif action == opacity_action and is_polygon:
+            cur = int(target._opacity * 100)
+            v, ok = QInputDialog.getInt(self, "Opacità", "Opacità (20-60%):", cur, 20, 60)
+            if ok:
+                target.setOpacity(v / 100.0)
+                target.update()
+                self._persist_displayed_item_if_needed(target)
+        elif action == delete_action:
             ref = target.data(Qt.UserRole) if hasattr(target, "data") else None
             if isinstance(ref, dict) and "event_id" in ref and "ann_index" in ref:
                 self.annotationDeleted.emit(ref["event_id"], ref["ann_index"])
@@ -1349,6 +1528,15 @@ class DrawingOverlay(QGraphicsView):
             if new_data:
                 self.annotationModified.emit(ref["event_id"], ref["ann_index"], new_data)
 
+    def is_editing_text(self) -> bool:
+        """True se l'utente sta modificando un DrawableText (non intercettare Space, ecc.)."""
+        fi = self.scene().focusItem() if self.scene() else None
+        return (
+            fi is not None
+            and isinstance(fi, DrawableText)
+            and fi.textInteractionFlags() == Qt.TextEditorInteraction
+        )
+
     def _find_drawable_item(self, item):
         """Trova l'item disegnabile (può essere sotto altri o un figlio)."""
         if item is None:
@@ -1383,7 +1571,8 @@ class DrawingOverlay(QGraphicsView):
             return
         if not isinstance(item, (QGraphicsEllipseItem, QGraphicsRectItem, DrawableCircle, DrawableRectangle,
                                  DrawableArrow, DrawableLine, DrawableCone, DrawableFreehand,
-                                 DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
+                                 DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow,
+                                 DrawablePolygon)):
             return
         self._resize_target_item = item
         item.setZValue(9998)  # sopra altri item, sotto le maniglie
@@ -1392,6 +1581,8 @@ class DrawingOverlay(QGraphicsView):
             handles_pos = self._get_arrow_line_handle_scene_positions(item)
         elif isinstance(item, (DrawableCone, DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
             handles_pos = self._get_three_point_handle_scene_positions(item)
+        elif isinstance(item, DrawablePolygon):
+            handles_pos = self._get_polygon_handle_scene_positions(item)
         else:
             handles_pos = self._get_rect_ellipse_handle_scene_positions(item)
         for i, hp in enumerate(handles_pos):
@@ -1421,6 +1612,11 @@ class DrawingOverlay(QGraphicsView):
         pos = item.scenePos()
         return [QPointF(pos.x() + p.x(), pos.y() + p.y()) for p in poly]
 
+    def _get_polygon_handle_scene_positions(self, item: DrawablePolygon):
+        """Una maniglia per ogni vertice del poligono (pos = 0,0)."""
+        poly = item.polygon()
+        return [item.mapToScene(QPointF(p.x(), p.y())) for p in poly]
+
     def _get_three_point_handle_scene_positions(self, item):
         """3 maniglie per forme con 3 punti (cono, linea curva, freccia curva, parabola)."""
         if isinstance(item, DrawableCone):
@@ -1441,6 +1637,8 @@ class DrawingOverlay(QGraphicsView):
             handles_pos = self._get_arrow_line_handle_scene_positions(item)
         elif isinstance(item, (DrawableCone, DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
             handles_pos = self._get_three_point_handle_scene_positions(item)
+        elif isinstance(item, DrawablePolygon):
+            handles_pos = self._get_polygon_handle_scene_positions(item)
         elif isinstance(item, DrawableFreehand):
             handles_pos = self._get_rect_ellipse_handle_scene_positions(item)
         else:
@@ -1507,6 +1705,13 @@ class DrawingOverlay(QGraphicsView):
                 poly[i] = local
                 item.setPolygon(poly)
             self._reposition_resize_handles()
+        elif isinstance(item, DrawablePolygon):
+            local = item.mapFromScene(scene_pos)
+            poly = QPolygonF(item.polygon())
+            if 0 <= i < len(poly):
+                poly[i] = local
+                item.setPolygon(poly)
+            self._reposition_resize_handles()
         elif isinstance(item, (DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
             local = item.mapFromScene(scene_pos)
             pts = item.getPoints()
@@ -1567,8 +1772,12 @@ class DrawingOverlay(QGraphicsView):
             self._apply_resize(scene_pos)
             event.accept()
             return
+        # Poligono: preview con linea fino al cursore
+        if self._tool == DrawTool.POLYGON and self._polygon_points:
+            pos = self.mapToScene(event.pos())
+            self._update_polygon_preview(pos)
         # Matita: disegno a mano libera continuo
-        if self._tool == DrawTool.PENCIL and self._pencil_path is not None:
+        elif self._tool == DrawTool.PENCIL and self._pencil_path is not None:
             pos = self.mapToScene(event.pos())
             self._pencil_path.lineTo(pos)
             self._safe_remove_item(self._current_item)

@@ -1,5 +1,6 @@
 """Finestra principale Football Analyzer."""
 import sys
+import uuid
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -7,10 +8,10 @@ from PyQt5.QtWidgets import (
     QSlider, QGroupBox, QTabWidget, QScrollArea, QFrame, QGridLayout,
     QSpinBox, QMessageBox, QInputDialog, QColorDialog, QComboBox,
     QDialog, QDialogButtonBox, QFormLayout, QProgressBar, QLineEdit,
-    QButtonGroup, QMenu
+    QButtonGroup, QMenu, QTextEdit, QGraphicsDropShadowEffect, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent, QSize
-from PyQt5.QtGui import QIcon, QFont, QColor
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEvent, QSize, QSettings, QRect
+from PyQt5.QtGui import QIcon, QFont, QColor, QKeyEvent, QPainter, QLinearGradient, QBrush, QPen
 from config import (
     DEFAULT_EVENT_TYPES, DRAW_COLORS, DEFAULT_CLIP_PRE_SECONDS,
     DEFAULT_CLIP_POST_SECONDS, HIGHLIGHTS_FOLDER, FREEZE_DURATION_SECONDS
@@ -121,6 +122,200 @@ class _EventRowWidget(QWidget):
         super().mouseDoubleClickEvent(event)
 
 
+class _ClipCardWidget(QFrame):
+    """Card professionale SaaS dark - glow disegnato direttamente nel paintEvent."""
+
+    def __init__(self, clip: dict, is_editing: bool, is_playing: bool,
+                 on_play=None, on_edit_click=None, on_delete=None,
+                 on_update_start=None, on_update_end=None, on_save=None, on_cancel=None,
+                 parent=None):
+        super().__init__(parent)
+        self._clip = clip
+        self._is_editing = is_editing
+        self._is_playing = is_playing
+        self._on_play = on_play
+        self._on_edit_click = on_edit_click
+        self._on_delete = on_delete
+        self._on_update_start = on_update_start
+        self._on_update_end = on_update_end
+        self._on_save = on_save
+        self._on_cancel = on_cancel
+        self.setAutoFillBackground(False)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self._build_ui()
+
+    def sizeHint(self):
+        h = 200 if not self._is_editing else 320
+        return QSize(300, h)
+
+    def paintEvent(self, event):
+        """Disegna card + glow verde laterale se playing."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        r = self.rect()
+        
+        # Card background + border
+        bg_color = QColor("#0f1b2e")
+        border_color = QColor(255, 255, 255, int(0.06 * 255))
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(QPen(border_color, 1))
+        painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), 14, 14)
+        
+        # Glow verde laterale se playing
+        playing = self._is_editing or self._is_playing
+        if playing:
+            glow_width = 20
+            glow_x = r.right() - glow_width
+            gradient = QLinearGradient(glow_x, 0, r.right(), 0)
+            gradient.setColorAt(0.0, QColor(34, 197, 94, 0))      # trasparente a sinistra
+            gradient.setColorAt(0.4, QColor(34, 197, 94, 60))
+            gradient.setColorAt(0.7, QColor(34, 197, 94, 140))
+            gradient.setColorAt(1.0, QColor(34, 197, 94, 200))    # verde pieno a destra
+            painter.setBrush(QBrush(gradient))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(QRect(glow_x, 0, glow_width, r.height()), 14, 14)
+        
+        painter.end()
+
+    def _build_ui(self):
+        """Layout professionale: titolo + durata + bottoni affiancati + elimina."""
+        self.setMinimumWidth(300)
+        self.setCursor(Qt.PointingHandCursor if not self._is_editing else Qt.ArrowCursor)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        # Riga 1: status-dot + titolo
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        status_dot = QFrame()
+        status_dot.setFixedSize(6, 6)
+        status_dot.setStyleSheet("background-color: #22c55e; border-radius: 3px;")
+        _dot_glow = QGraphicsDropShadowEffect()
+        _dot_glow.setBlurRadius(4)
+        _dot_glow.setOffset(0, 0)
+        _dot_glow.setColor(QColor(34, 197, 94, 150))
+        status_dot.setGraphicsEffect(_dot_glow)
+        header.addWidget(status_dot)
+        from html import escape
+        name_esc = escape(str(self._clip["name"]))
+        title = QLabel(name_esc)
+        title.setStyleSheet("font-size: 14px; font-weight: 600; color: #e2e8f0;")
+        title.setWordWrap(True)
+        header.addWidget(title, 1)
+        layout.addLayout(header)
+        layout.addSpacing(8)
+
+        # Riga 2: durata
+        durata = QLabel(f"Durata: {self._clip['duration'] // 1000}s")
+        durata.setStyleSheet("font-size: 13px; color: #94a3b8;")
+        layout.addWidget(durata)
+        layout.addSpacing(12)
+
+        # Riga 3: bottoni affiancati - altezza 36px, spacing 8px
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        _btn_style = (
+            "padding: 8px 16px; border-radius: 8px; border: none; "
+            "font-weight: 500; font-size: 13px;"
+        )
+        play_btn = QPushButton("Riproduci")
+        play_btn.setStyleSheet(
+            f"{_btn_style} color: white; "
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+            "stop:0 #22c55e, stop:1 #16a34a);"
+        )
+        play_btn.setCursor(Qt.PointingHandCursor)
+        play_btn.setFixedHeight(36)
+        play_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        play_btn.clicked.connect(lambda checked=False, c=self._clip: self._on_play and self._on_play(c))
+        
+        edit_btn = QPushButton("Modifica")
+        edit_btn.setStyleSheet(
+            f"{_btn_style} color: #94a3b8; background-color: #1e293b;"
+        )
+        edit_btn.setCursor(Qt.PointingHandCursor)
+        edit_btn.setFixedHeight(36)
+        edit_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        edit_btn.clicked.connect(lambda checked=False, c=self._clip: self._on_edit_click and self._on_edit_click(c))
+        
+        actions.addWidget(play_btn)
+        actions.addWidget(edit_btn)
+        actions.addStretch()
+        layout.addLayout(actions)
+        layout.addSpacing(8)
+
+        # Riga editing (se attiva)
+        if self._is_editing:
+            edit_row = QHBoxLayout()
+            edit_row.setSpacing(8)
+            _eb = "padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: 500; color: #e2e8f0; background-color: #1e293b;"
+            upd_start = QPushButton("Aggiorna Inizio")
+            upd_start.setStyleSheet(_eb)
+            upd_start.clicked.connect(lambda: self._on_update_start and self._on_update_start())
+            upd_end = QPushButton("Aggiorna Fine")
+            upd_end.setStyleSheet(_eb)
+            upd_end.clicked.connect(lambda: self._on_update_end and self._on_update_end())
+            edit_row.addWidget(upd_start)
+            edit_row.addWidget(upd_end)
+            save_btn = QPushButton("Salva")
+            save_btn.setStyleSheet(
+                "padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: 500; "
+                "color: white; background-color: #22c55e; border: none;"
+            )
+            save_btn.clicked.connect(lambda: self._on_save and self._on_save())
+            cancel_btn = QPushButton("Annulla")
+            cancel_btn.setStyleSheet(
+                "padding: 8px 12px; border-radius: 6px; font-size: 11px; "
+                "color: #94a3b8; background: transparent; border: 1px solid #334155;"
+            )
+            cancel_btn.clicked.connect(lambda: self._on_cancel and self._on_cancel())
+            edit_row.addWidget(save_btn)
+            edit_row.addWidget(cancel_btn)
+            edit_row.addStretch()
+            layout.addLayout(edit_row)
+            layout.addSpacing(8)
+
+        # Elimina: centrato, spazio sopra
+        layout.addSpacing(4)
+        del_row = QHBoxLayout()
+        del_row.addStretch()
+        del_btn = QPushButton("Elimina")
+        del_btn.setFlat(True)
+        del_btn.setStyleSheet(
+            "font-size: 12px; color: #ef4444; background: transparent; border: none; "
+            "padding: 4px 8px;"
+        )
+        del_btn.setCursor(Qt.PointingHandCursor)
+        del_btn.clicked.connect(lambda checked=False, c=self._clip: self._on_delete and self._on_delete(c))
+        del_row.addWidget(del_btn)
+        del_row.addStretch()
+        layout.addLayout(del_row)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event):
+        """Clic ovunque sulla card (eccetto pulsanti) → Riproduci."""
+        if self._is_editing:
+            return super().mousePressEvent(event)
+        child = self.childAt(event.pos())
+        while child and child != self:
+            if isinstance(child, QPushButton):
+                return super().mousePressEvent(event)
+            child = child.parentWidget()
+        if self._on_play:
+            self._on_play(self._clip)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class MainWindow(QMainWindow):
     """Finestra principale dell'applicazione."""
 
@@ -139,9 +334,12 @@ class MainWindow(QMainWindow):
             self.event_manager.load_default_types(DEFAULT_EVENT_TYPES)
         if not self.event_manager.get_event_type("annotazione"):
             self.event_manager.add_event_type(EventType("annotazione", "Annotazione", "✏️", "#00D9A5"))
-        self._event_clip_starts = {}  # evt_id -> start_ms per clip personalizzate
-        self._clip_edit_event_id = None  # se impostato, modalità creazione clip per questo evento
         self._focus_label_event_id = None  # dopo refresh, metti focus sul campo nome di questo evento
+        self.clips = []  # finestre temporali indipendenti: [{id, start, end, duration, name}]
+        self.temp_clip_start = None  # ms, posizione Inizio prima di premere Fine
+        self.active_clip_id = None   # id clip in riproduzione (stop a end)
+        self.editing_clip_id = None  # id clip in modifica Inizio/Fine
+        self._editing_clip_backup = None  # backup valori per Annulla
         self.project = Project()
         self.clip_manager = ClipManager(HIGHLIGHTS_FOLDER)
         self.stats_manager = StatisticsManager(self.event_manager)
@@ -195,6 +393,19 @@ class MainWindow(QMainWindow):
         self.play_btn.clicked.connect(self._toggle_play)
         self.pause_btn = QPushButton("⏸ Pausa")
         self.pause_btn.clicked.connect(self.video_player.pause)
+        # Skip seconds per -Ns / +Ns (default 5, personalizzabile con click destro)
+        self._skip_seconds = QSettings().value("video/skip_seconds", 5, type=int)
+        self._skip_seconds = max(1, min(120, self._skip_seconds))
+        self.rewind_btn = QPushButton(f"–{self._skip_seconds}s")
+        self.rewind_btn.setToolTip(f"Riavvolgi {self._skip_seconds} secondi (click destro per modificare)")
+        self.rewind_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.rewind_btn.customContextMenuRequested.connect(self._show_skip_seconds_menu)
+        self.rewind_btn.clicked.connect(self._seek_backward)
+        self.forward_btn = QPushButton(f"+{self._skip_seconds}s")
+        self.forward_btn.setToolTip(f"Avanza {self._skip_seconds} secondi (click destro per modificare)")
+        self.forward_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.forward_btn.customContextMenuRequested.connect(self._show_skip_seconds_menu)
+        self.forward_btn.clicked.connect(self._seek_forward)
 
         self.time_label = QLabel("0:00 / 0:00")
 
@@ -259,6 +470,8 @@ class MainWindow(QMainWindow):
         ctrl_row.addWidget(self.frame_btn)
         ctrl_row.addWidget(self.play_btn)
         ctrl_row.addWidget(self.pause_btn)
+        ctrl_row.addWidget(self.rewind_btn)
+        ctrl_row.addWidget(self.forward_btn)
         self.prev_event_btn = QPushButton("⏮")
         self.prev_event_btn.setToolTip("Evento precedente")
         self.prev_event_btn.clicked.connect(self._go_to_prev_event)
@@ -276,6 +489,30 @@ class MainWindow(QMainWindow):
         self.zoom_btn.clicked.connect(self._toggle_zoom_tool)
         ctrl_row.addWidget(self.zoom_btn)
         ctrl_row.addWidget(self.time_label, 1)
+        # Separatore verticale
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setStyleSheet("background-color: #30363D; max-width: 1px; margin: 0 8px;")
+        ctrl_row.addWidget(sep)
+        # Sezione Crea Clip
+        clip_grp = QFrame()
+        clip_grp.setStyleSheet("QFrame { background-color: transparent; }")
+        clip_hl = QHBoxLayout(clip_grp)
+        clip_hl.setContentsMargins(4, 0, 4, 0)
+        clip_hl.setSpacing(8)
+        clip_lbl = QLabel("🎬 Crea Clip")
+        clip_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #F0F6FC;")
+        clip_lbl.setToolTip("Inizio → Fine: crea una finestra temporale")
+        clip_hl.addWidget(clip_lbl)
+        self.clip_inizio_btn = QPushButton("Inizio")
+        self.clip_inizio_btn.setToolTip("Imposta la posizione corrente come inizio della clip")
+        self.clip_inizio_btn.clicked.connect(self._on_clip_inizio)
+        self.clip_fine_btn = QPushButton("Fine")
+        self.clip_fine_btn.setToolTip("Imposta la fine e crea la clip")
+        self.clip_fine_btn.clicked.connect(self._on_clip_fine)
+        clip_hl.addWidget(self.clip_inizio_btn)
+        clip_hl.addWidget(self.clip_fine_btn)
+        ctrl_row.addWidget(clip_grp)
         center.addLayout(ctrl_row)
         center.addWidget(QLabel("Timeline eventi:"))
         center.addWidget(self.timeline_bar)
@@ -300,12 +537,14 @@ class MainWindow(QMainWindow):
             DrawTool.ZIGZAG_ARROW: "Freccia zigzag",
             DrawTool.DOUBLE_ARROW: "Freccia doppia punta",
             DrawTool.DASHED_LINE: "Linea tratteggiata",
+            DrawTool.POLYGON: "Poligono",
         }
         for tool in [
             DrawTool.CIRCLE, DrawTool.ARROW, DrawTool.LINE, DrawTool.RECTANGLE,
             DrawTool.TEXT, DrawTool.PENCIL,
             DrawTool.CURVED_LINE, DrawTool.CURVED_ARROW, DrawTool.PARABOLA_ARROW,
             DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW, DrawTool.DOUBLE_ARROW, DrawTool.DASHED_LINE,
+            DrawTool.POLYGON,
         ]:
             btn = QPushButton()
             btn.setIcon(get_draw_tool_icon(tool.value, 18))
@@ -370,6 +609,11 @@ class MainWindow(QMainWindow):
         assemble_btn = QPushButton("🎬 Assembla highlights")
         assemble_btn.clicked.connect(self._assemble_highlights)
         clip_layout.addWidget(assemble_btn)
+        clip_layout.addWidget(QLabel("Le tue clip (finestre temporali):"))
+        self.clips_list = QListWidget()
+        self.clips_list.setMinimumHeight(180)
+        self.clips_list.setUniformItemSizes(False)
+        clip_layout.addWidget(self.clips_list)
         self.clip_status_label = QLabel("")
         clip_layout.addWidget(self.clip_status_label)
         clip_layout.addStretch()
@@ -407,13 +651,49 @@ class MainWindow(QMainWindow):
         self.drawing_overlay.annotationDeleted.connect(self._on_annotation_deleted)
         self.drawing_overlay.annotationModified.connect(self._on_annotation_modified)
         self.drawing_overlay.zoomRequested.connect(self._on_zoom_requested)
+        QApplication.instance().installEventFilter(self)
 
     def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress:
+            if self._handle_video_shortcut(event):
+                return True
         if obj == self.video_player and event.type() == QEvent.Resize:
             w, h = self.video_player.width(), self.video_player.height()
             self.drawing_overlay.setGeometry(0, 0, w, h)
             self.drawing_overlay.setSceneRect(0, 0, w, h)
         return super().eventFilter(obj, event)
+
+    def _handle_video_shortcut(self, event: QKeyEvent) -> bool:
+        """Gestisce scorciatoie video. Ritorna True se consuma l'evento."""
+        fw = QApplication.focusWidget()
+        if fw:
+            if isinstance(fw, (QLineEdit, QTextEdit, QSpinBox, QComboBox)):
+                return False
+            if fw == self.drawing_overlay and self.drawing_overlay.is_editing_text():
+                return False
+        key = event.key()
+        mods = event.modifiers()
+        if mods not in (Qt.NoModifier, Qt.KeypadModifier):
+            return False
+        if key == Qt.Key_Space:
+            self._toggle_play()
+            return True
+        if key == Qt.Key_R:
+            self._restart_video()
+            return True
+        if key == Qt.Key_Left:
+            self._seek_backward()
+            return True
+        if key == Qt.Key_Right:
+            self._seek_forward()
+            return True
+        if key in (Qt.Key_Comma, Qt.Key_Less):  # virgola, anche layout non-US
+            self._go_to_prev_event()
+            return True
+        if key in (Qt.Key_Period, Qt.Key_Greater):  # punto, anche layout non-US
+            self._go_to_next_event()
+            return True
+        return False
 
     def _on_zoom_requested(self, delta: int, mouse_x: int, mouse_y: int):
         """Rotella con strumento Zoom attivo: zoom verso il puntatore (max 5x)."""
@@ -443,11 +723,19 @@ class MainWindow(QMainWindow):
             f"{d // 60000}:{(d % 60000) // 1000:02d}"
         )
         if self.video_player.state() == 1:
-            evt = self._get_event_reached_while_playing(last, ms)
-            if evt is not None:
-                self.video_player.pause()
-                self.video_player.setPosition(evt.timestamp_ms)
-                self._last_position_ms = evt.timestamp_ms
+            if self.active_clip_id is not None:
+                clip = self._get_clip_by_id(self.active_clip_id)
+                if clip and ms >= clip["end"]:
+                    self.video_player.pause()
+                    self.active_clip_id = None
+                    self._refresh_clips_list()
+                    self.statusBar().showMessage("Fine della clip", 2000)
+            else:
+                evt = self._get_event_reached_while_playing(last, ms)
+                if evt is not None:
+                    self.video_player.pause()
+                    self.video_player.setPosition(evt.timestamp_ms)
+                    self._last_position_ms = evt.timestamp_ms
         self._refresh_drawings_visibility()
 
     def _get_event_reached_while_playing(self, from_ms: int, to_ms: int):
@@ -547,6 +835,51 @@ class MainWindow(QMainWindow):
 
     def _step_frame(self):
         self.video_player.stepForward()
+
+    def _seek_backward(self):
+        """Riavvolgi di _skip_seconds secondi (min 0)."""
+        pos = self.video_player.position()
+        new_pos = max(0, pos - self._skip_seconds * 1000)
+        self.video_player.setPosition(new_pos)
+
+    def _seek_forward(self):
+        """Avanza di _skip_seconds secondi (max duration)."""
+        pos = self.video_player.position()
+        duration = self.video_player.duration()
+        new_pos = min(duration, pos + self._skip_seconds * 1000)
+        self.video_player.setPosition(new_pos)
+
+    def _show_skip_seconds_menu(self, pos):
+        """Menu contestuale per modificare i secondi di skip."""
+        menu = QMenu(self)
+        presets = [3, 5, 8, 10, 15, 30, 60]
+        for s in presets:
+            a = menu.addAction(f"{s}s")
+            a.setData(s)
+        menu.addSeparator()
+        custom_action = menu.addAction("Personalizza...")
+        btn = self.sender()
+        global_pos = btn.mapToGlobal(pos) if btn else self.rewind_btn.mapToGlobal(pos)
+        action = menu.exec_(global_pos)
+        if action == custom_action:
+            v, ok = QInputDialog.getInt(
+                self, "Secondi di skip",
+                "Secondi (1–120):",
+                self._skip_seconds, 1, 120
+            )
+            if ok:
+                self._set_skip_seconds(v)
+        elif action and action.data() is not None:
+            self._set_skip_seconds(action.data())
+
+    def _set_skip_seconds(self, seconds: int):
+        """Aggiorna il valore di skip, salva in QSettings e aggiorna le etichette."""
+        self._skip_seconds = max(1, min(120, seconds))
+        QSettings().setValue("video/skip_seconds", self._skip_seconds)
+        self.rewind_btn.setText(f"–{self._skip_seconds}s")
+        self.rewind_btn.setToolTip(f"Riavvolgi {self._skip_seconds} secondi (click destro per modificare)")
+        self.forward_btn.setText(f"+{self._skip_seconds}s")
+        self.forward_btn.setToolTip(f"Avanza {self._skip_seconds} secondi (click destro per modificare)")
 
     def _seek_to(self, ms: int):
         self.video_player.setPosition(ms)
@@ -705,20 +1038,6 @@ class MainWindow(QMainWindow):
                 lambda e=evt, n=name_edit: self._on_event_label_finished(e, n)
             )
             top_layout.addWidget(name_edit, 1)
-            inizio_btn = QPushButton("Inizio")
-            inizio_btn.setFixedSize(52, 26)
-            inizio_btn.setStyleSheet("font-size: 11px; padding: 2px;")
-            inizio_btn.setToolTip("Imposta la posizione corrente come inizio clip (attivo solo in modalità creazione)")
-            inizio_btn.clicked.connect(lambda checked=False, e=evt: self._on_clip_inizio(e))
-            inizio_btn.setEnabled(evt.id == self._clip_edit_event_id)
-            top_layout.addWidget(inizio_btn)
-            fine_btn = QPushButton("Fine")
-            fine_btn.setFixedSize(52, 26)
-            fine_btn.setStyleSheet("font-size: 11px; padding: 2px;")
-            fine_btn.setToolTip("Imposta la posizione corrente come fine e crea la clip (attivo solo in modalità creazione)")
-            fine_btn.clicked.connect(lambda checked=False, e=evt: self._on_clip_fine(e))
-            fine_btn.setEnabled(evt.id == self._clip_edit_event_id)
-            top_layout.addWidget(fine_btn)
             main_layout.addLayout(top_layout)
             desc_edit = QLineEdit()
             desc_edit.setPlaceholderText("Descrizione...")
@@ -752,18 +1071,9 @@ class MainWindow(QMainWindow):
         if not evt:
             return
         menu = QMenu(self)
-        crea_clip_act = menu.addAction("Crea clip (modalità modifica)" if self._clip_edit_event_id != evt.id else "Esci da modalità creazione clip")
         elimina_act = menu.addAction("Elimina")
         action = menu.exec_(self.events_list.mapToGlobal(pos))
-        if action == crea_clip_act:
-            if self._clip_edit_event_id == evt.id:
-                self._clip_edit_event_id = None
-                self.statusBar().showMessage("Uscita da modalità creazione clip", 3000)
-            else:
-                self._clip_edit_event_id = evt.id
-                self.statusBar().showMessage("Modalità creazione clip: usa Inizio e Fine per creare la clip", 4000)
-            self._refresh_events_list()
-        elif action == elimina_act:
+        if action == elimina_act:
             clip_paths = self.project.remove_playlist_items_by_event_id(evt.id)
             for p in clip_paths:
                 try:
@@ -780,7 +1090,6 @@ class MainWindow(QMainWindow):
     def _on_event_double_click(self, item):
         evt = item.data(Qt.UserRole)
         if evt:
-            self._clip_edit_event_id = None
             self._refresh_events_list()
             self.video_player.setPosition(evt.timestamp_ms)
 
@@ -806,52 +1115,158 @@ class MainWindow(QMainWindow):
         """Salva il label dell'evento (chiamato in modo differito)."""
         self.event_manager.update_event_label(evt_id, text)
 
-    def _on_clip_inizio(self, evt: Event):
-        """Imposta la posizione video corrente come inizio della clip per questo evento."""
-        if evt.id != self._clip_edit_event_id:
-            return
-        pos = self.video_player.position()
-        self._event_clip_starts[evt.id] = pos
-        self.statusBar().showMessage(f"Inizio impostato a {pos // 1000}s. Porta il video alla fine e clicca Fine.", 4000)
+    def _format_time_mmss(self, ms: int) -> str:
+        """Formatta ms come mm:ss."""
+        s = ms // 1000
+        return f"{s // 60:02d}:{s % 60:02d}"
 
-    def _on_clip_fine(self, evt: Event):
+    def _update_clip_inizio_btn_state(self):
+        """Aggiorna lo stato visivo del pulsante Inizio (evidenziato se attivo)."""
+        active = self.temp_clip_start is not None
+        self.clip_inizio_btn.setProperty("accent", "true" if active else False)
+        self.clip_inizio_btn.style().unpolish(self.clip_inizio_btn)
+        self.clip_inizio_btn.style().polish(self.clip_inizio_btn)
+
+    def _on_clip_inizio(self):
+        """Imposta la posizione corrente come inizio della clip."""
+        self.temp_clip_start = self.video_player.position()
+        self._update_clip_inizio_btn_state()
+        ts_str = self._format_time_mmss(self.temp_clip_start)
+        self.statusBar().showMessage(f"Inizio impostato a {ts_str}", 4000)
+
+    def _on_clip_fine(self):
         """Crea la clip dall'inizio salvato alla posizione corrente."""
-        if evt.id != self._clip_edit_event_id:
+        if self.temp_clip_start is None:
+            QMessageBox.warning(self, "Attenzione", "Imposta prima l'inizio della clip")
             return
-        if not self.project.video_path:
-            QMessageBox.warning(self, "Attenzione", "Carica prima un video.")
-            return
-        if not self.clip_manager.is_available():
-            QMessageBox.warning(self, "FFmpeg", "FFmpeg non trovato. Installa FFmpeg e aggiungilo al PATH.")
-            return
-        end_ms = self.video_player.position()
-        start_ms = self._event_clip_starts.get(evt.id)
-        if start_ms is None:
+        current_ms = self.video_player.position()
+        if current_ms <= self.temp_clip_start:
             QMessageBox.warning(
                 self, "Attenzione",
-                "Clicca prima 'Inizio' alla posizione desiderata, poi 'Fine' alla fine."
+                "Il punto di fine deve essere successivo all'inizio"
             )
             return
-        if end_ms <= start_ms:
-            QMessageBox.warning(self, "Attenzione", "La fine deve essere dopo l'inizio.")
-            return
-        types = {t.id: t.name for t in self.event_manager.get_event_types()}
-        label = types.get(evt.event_type_id, "evento")
-        safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)[:20]
-        name = f"clip_{safe_label}_{start_ms}_{end_ms}"
-        path = self.clip_manager.create_clip_range(
-            self.project.video_path, start_ms, end_ms, name
-        )
-        if path:
-            self.project.add_to_playlist(
-                PlaylistItem(clip_path=path, start_ms=0, end_ms=0, label=Path(path).stem, event_id=evt.id)
+        clip_id = str(uuid.uuid4())[:8]
+        duration_ms = current_ms - self.temp_clip_start
+        clip = {
+            "id": clip_id,
+            "start": self.temp_clip_start,
+            "end": current_ms,
+            "duration": duration_ms,
+            "name": f"Clip {len(self.clips) + 1}"
+        }
+        self.clips.append(clip)
+        self.temp_clip_start = None
+        self._update_clip_inizio_btn_state()
+        self._refresh_clips_list()
+        self.statusBar().showMessage("Clip creata con successo", 3000)
+
+    def _get_clip_by_id(self, clip_id: str):
+        """Ritorna la clip con id dato o None."""
+        for c in self.clips:
+            if c["id"] == clip_id:
+                return c
+        return None
+
+    def _refresh_clips_list(self):
+        """Aggiorna la lista clip nell'UI."""
+        self.clips_list.clear()
+        for clip in self.clips:
+            item = QListWidgetItem()
+            card = _ClipCardWidget(
+                clip,
+                is_editing=(self.editing_clip_id == clip["id"]),
+                is_playing=(self.active_clip_id == clip["id"]),
+                on_play=self._play_clip,
+                on_edit_click=self._enter_clip_edit,
+                on_delete=self._delete_clip,
+                on_update_start=self._clip_update_start,
+                on_update_end=self._clip_update_end,
+                on_save=self._clip_save_edit,
+                on_cancel=self._clip_cancel_edit,
             )
-            QMessageBox.information(self, "Clip creata", f"Clip salvata in:\n{path}")
-            del self._event_clip_starts[evt.id]
-            self._clip_edit_event_id = None
-            self._refresh_events_list()
-        else:
-            QMessageBox.warning(self, "Errore", "Impossibile creare la clip.")
+            h = 320 if self.editing_clip_id == clip["id"] else 200
+            item.setSizeHint(QSize(0, h))
+            item.setData(Qt.UserRole, clip)
+            self.clips_list.addItem(item)
+            self.clips_list.setItemWidget(item, card)
+
+    def _play_clip(self, clip: dict):
+        """Riproduce la clip (seek a start, play, stop a end)."""
+        if self.editing_clip_id and self.editing_clip_id != clip["id"]:
+            self._clip_cancel_edit()
+        self.active_clip_id = clip["id"]
+        self.video_player.setPosition(clip["start"])
+        self.video_player.play()
+        self._refresh_clips_list()
+
+    def _enter_clip_edit(self, clip: dict):
+        """Entra in modalità modifica Inizio/Fine per la clip."""
+        self._editing_clip_backup = {
+            "start": clip["start"],
+            "end": clip["end"],
+            "duration": clip["duration"],
+        }
+        self.editing_clip_id = clip["id"]
+        self.video_player.setPosition(clip["start"])
+        self.video_player.pause()
+        self._refresh_clips_list()
+        self.statusBar().showMessage("Modifica: usa 'Aggiorna Inizio' e 'Aggiorna Fine', poi 'Salva'", 4000)
+
+    def _clip_update_start(self):
+        """Aggiorna start della clip in editing con posizione corrente."""
+        clip = self._get_clip_by_id(self.editing_clip_id)
+        if not clip:
+            return
+        clip["start"] = self.video_player.position()
+        if clip["end"] <= clip["start"]:
+            clip["end"] = clip["start"] + 1000
+        clip["duration"] = clip["end"] - clip["start"]
+        self.video_player.setPosition(clip["start"])
+        self._refresh_clips_list()
+        self.statusBar().showMessage("Inizio aggiornato", 2000)
+
+    def _clip_update_end(self):
+        """Aggiorna end della clip in editing con posizione corrente."""
+        clip = self._get_clip_by_id(self.editing_clip_id)
+        if not clip:
+            return
+        clip["end"] = self.video_player.position()
+        if clip["end"] <= clip["start"]:
+            clip["start"] = max(0, clip["end"] - 1000)
+        clip["duration"] = clip["end"] - clip["start"]
+        self._refresh_clips_list()
+        self.statusBar().showMessage("Fine aggiornata", 2000)
+
+    def _clip_save_edit(self):
+        """Esce da modalità editing senza ripristinare."""
+        self.editing_clip_id = None
+        self._editing_clip_backup = None
+        self._refresh_clips_list()
+        self.statusBar().showMessage("Modifiche salvate", 2000)
+
+    def _clip_cancel_edit(self):
+        """Annulla modifiche e esce da modalità editing."""
+        clip = self._get_clip_by_id(self.editing_clip_id)
+        if clip and self._editing_clip_backup:
+            clip["start"] = self._editing_clip_backup["start"]
+            clip["end"] = self._editing_clip_backup["end"]
+            clip["duration"] = self._editing_clip_backup["duration"]
+        self.editing_clip_id = None
+        self._editing_clip_backup = None
+        self._refresh_clips_list()
+        self.statusBar().showMessage("Modifiche annullate", 2000)
+
+    def _delete_clip(self, clip: dict):
+        """Elimina la clip dalla lista."""
+        self.clips = [c for c in self.clips if c["id"] != clip["id"]]
+        if self.active_clip_id == clip["id"]:
+            self.video_player.pause()
+            self.active_clip_id = None
+        if self.editing_clip_id == clip["id"]:
+            self.editing_clip_id = None
+            self._editing_clip_backup = None
+        self._refresh_clips_list()
 
     def _set_draw_tool(self, tool: DrawTool):
         self.drawing_overlay.setTool(tool)
@@ -950,11 +1365,16 @@ class MainWindow(QMainWindow):
         self.drawing_overlay.clearDrawings()
         self.project.clear_playlist()
         self.project.drawings.clear()
-        self._event_clip_starts.clear()
-        self._clip_edit_event_id = None
+        self.clips = []
+        self.temp_clip_start = None
+        self.active_clip_id = None
+        self.editing_clip_id = None
+        self._editing_clip_backup = None
+        self._update_clip_inizio_btn_state()
         self.video_player.setZoomLevel(1.0)
         self._refresh_events_list()
         self._update_timeline_events()
+        self._refresh_clips_list()
         self.clip_status_label.setText("")
 
     def open_file(self):

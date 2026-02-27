@@ -24,6 +24,7 @@ elif hasattr(Qt, 'AA_EnableHighDpiScaling'):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Football Analyzer")
+    app.setOrganizationName("FootballAnalyzer")
     apply_palette(app)
 
     win = MainWindow()

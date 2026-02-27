@@ -66,6 +66,9 @@ SVG_DOUBLE_ARROW = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"
 # Linea tratteggiata
 SVG_DASHED_LINE = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><line x1="2" y1="9" x2="16" y2="9" {_STROKE_DASHED}/></svg>'
 
+# Poligono (esagono stilizzato per zone)
+SVG_POLYGON = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><path d="M9 2 L15 6 L15 12 L9 16 L3 12 L3 6 Z" {_STROKE}/></svg>'
+
 
 def get_draw_tool_icon(tool_name: str, size: int = 18) -> QIcon:
     """Ritorna QIcon per lo strumento dato."""
@@ -85,6 +88,7 @@ def get_draw_tool_icon(tool_name: str, size: int = 18) -> QIcon:
         "zigzag_arrow": SVG_ZIGZAG_ARROW,
         "double_arrow": SVG_DOUBLE_ARROW,
         "dashed_line": SVG_DASHED_LINE,
+        "polygon": SVG_POLYGON,
     }
     svg = mapping.get(tool_name, SVG_CIRCLE)
     return _svg_to_icon(svg, size, _ICON_COLOR)
