@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controlli</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="center-body">
+    <div class="controls-container">
+        <!-- Progress bar (slider) -->
+        <div class="progress-section">
+            <div class="timeline-track" id="mainTimelineTrack">
+                <div class="timeline-progress" id="timelineProgress"></div>
+                <div class="timeline-handle" id="timelineHandle"></div>
+            </div>
+        </div>
+
+        <!-- Playback Controls Row -->
+        <div class="ctrl-row">
+            <button class="btn-control" id="btnRestart" title="Restart">↺ Restart</button>
+            <button class="btn-control" id="btnSpeed" title="Velocità">1x</button>
+            <button class="btn-control" id="btnFrame" title="Frame">▶|</button>
+            <button class="btn-control btn-play" id="btnPlay">▶ Play</button>
+            <button class="btn-control" id="btnPause">⏸ Pausa</button>
+            <button class="btn-control" id="btnRewind" title="Indietro Ns (click destro per intervallo)">-5s</button>
+            <button class="btn-control" id="btnForward" title="Avanti Ns (click destro per intervallo)">+5s</button>
+            <button class="btn-control" id="btnPrevEvent" title="Evento precedente">⏮</button>
+            <button class="btn-control" id="btnNextEvent" title="Evento successivo">⏭</button>
+            <div class="time-display-inline">
+                <span id="currentTime">00:00</span>
+                <span> / </span>
+                <span id="totalTime">00:00</span>
+            </div>
+            <button class="btn-control" id="btnShortcuts" title="Scorciatoie da tastiera (F1)">⌨ ?</button>
+            <div class="ctrl-separator"></div>
+            <div class="clip-quick-group">
+                <span class="clip-quick-label">Crea Clip</span>
+                <button class="btn-control" id="btnClipStart">Inizio</button>
+                <button class="btn-control" id="btnClipEnd">Fine</button>
+            </div>
+        </div>
+
+        <!-- Timeline eventi -->
+        <div class="timeline-events-section">
+            <label class="timeline-label">Timeline eventi:</label>
+            <div class="timeline-canvas-wrapper">
+                <canvas id="timelineCanvas" class="timeline-canvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Strumenti disegno -->
+        <div class="draw-tools-section">
+            <label class="draw-tools-label">Strumenti disegno</label>
+            <div class="draw-tools-row">
+                <button class="tool-btn" id="toolCircle" title="Cerchio">○</button>
+                <button class="tool-btn" id="toolArrow" title="Freccia">→</button>
+                <button class="tool-btn" id="toolCurvedArrow" title="Freccia curva">↷</button>
+                <button class="tool-btn" id="toolParabola" title="Parabola">⌒</button>
+                <button class="tool-btn" id="toolLine" title="Linea">—</button>
+                <button class="tool-btn" id="toolRect" title="Rettangolo">□</button>
+                <button class="tool-btn" id="toolText" title="Testo">T</button>
+                <button class="tool-btn" id="toolPencil" title="Matita">✎</button>
+                <button class="btn-control draw-action-btn" id="btnDrawColor" title="Colore / Spessore">Colore / Spessore</button>
+                <button class="btn-control draw-action-btn" id="btnClearDrawings" title="Cancella disegni">Cancella disegni</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- QWebChannel bridge -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

@@ -26,7 +26,7 @@ from .event_buttons_config_dialog import (
     clear_default_config,
 )
 from .theme import get_stylesheet, apply_palette, ACCENT
-from .drawing_overlay import DrawingOverlay, DrawTool, ArrowLineStyle
+from .drawing_overlay import DrawingOverlay, DrawTool, ArrowLineStyle, DrawableText
 from .draw_icons import get_draw_tool_icon
 from .opencv_video_widget import OpenCVVideoWidget
 
@@ -788,7 +788,7 @@ class MainWindow(QMainWindow):
         if not data:
             return
         ts = self.video_player.position()
-        evt = self.event_manager.get_annotazione_event_at_timestamp(ts)
+        evt = self.event_manager.get_event_at_timestamp(ts)
         if evt:
             self.event_manager.add_annotation_to_event(evt.id, data)
         else:
@@ -852,7 +852,7 @@ class MainWindow(QMainWindow):
     def _show_skip_seconds_menu(self, pos):
         """Menu contestuale per modificare i secondi di skip."""
         menu = QMenu(self)
-        presets = [3, 5, 8, 10, 15, 30, 60]
+        presets = [3, 5, 10, 30, 60]
         for s in presets:
             a = menu.addAction(f"{s}s")
             a.setData(s)

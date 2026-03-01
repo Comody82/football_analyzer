@@ -3,14 +3,21 @@ from PyQt5.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsTextItem, QGraphicsRectItem,
     QGraphicsPolygonItem, QGraphicsPathItem, QApplication,
-    QInputDialog, QColorDialog, QFontDialog, QMenu, QShortcut
+    QInputDialog, QColorDialog, QFontDialog, QMenu, QShortcut,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSpinBox, QFrame, QWidget,
+    QGraphicsOpacityEffect, QCheckBox, QComboBox,
 )
 from PyQt5.QtGui import (
     QPen, QBrush, QColor, QPainter, QPolygonF, QFont,
     QLinearGradient, QPainterPath, QPainterPathStroker, QWheelEvent,
-    QKeySequence, QTransform
+    QKeySequence, QTransform, QRegion, QPolygon,
+    QTextDocument, QTextOption, QTextBlockFormat, QTextCharFormat, QTextCursor,
 )
-from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF, pyqtSignal
+from PyQt5.QtCore import (
+    Qt, QPointF, QRectF, QLineF, QPoint, QObject, pyqtSignal, QEvent,
+    QPropertyAnimation, QEasingCurve, QTimer, QSize, QRect,
+)
+from PyQt5.QtCore import QParallelAnimationGroup
 from typing import Optional, List, Tuple, Dict, Any
 from enum import Enum
 import math
@@ -708,7 +715,8 @@ class DrawableParabolaArrow(QGraphicsPathItem):
 
 
 class DrawableText(QGraphicsTextItem):
-    """Testo disegnabile: selezionabile, trascinabile, doppio clic per modificare."""
+    """Testo disegnabile: selezionabile, trascinabile, doppio clic per modificare.
+       Supporta formato: font, colore, sfondo, contorno, allineamento, interlinea."""
     def __init__(self, text: str = "", color: QColor = Qt.white):
         super().__init__(text)
         self.setDefaultTextColor(color)
@@ -719,6 +727,70 @@ class DrawableText(QGraphicsTextItem):
         font = QFont("Segoe UI", 24, QFont.Bold)
         self.setFont(font)
         self._color = color
+        self._fill_color = QColor(0, 0, 0, 0)
+        self._outline_color = QColor(255, 255, 255)
+        self._outline_width = 0  # 0 = nessun contorno
+
+    def apply_format(self, fmt: dict):
+        """Applica formato da TextFormatToolbar."""
+        if "font_family" in fmt or "font_size" in fmt or "bold" in fmt or "italic" in fmt:
+            font = self.font()
+            if "font_family" in fmt:
+                font.setFamily(fmt["font_family"])
+            if "font_size" in fmt:
+                font.setPointSize(fmt["font_size"])
+            if "bold" in fmt:
+                font.setBold(fmt["bold"])
+            if "italic" in fmt:
+                font.setItalic(fmt["italic"])
+            if "underline" in fmt:
+                font.setUnderline(fmt["underline"])
+            self.setFont(font)
+        if "text_color" in fmt:
+            c = fmt["text_color"]
+            self._color = QColor(c)
+            self.setDefaultTextColor(self._color)
+        if "fill_color" in fmt:
+            self._fill_color = QColor(fmt["fill_color"])
+        if "opacity" in fmt:
+            self.setOpacity(fmt["opacity"])
+        if "outline_width" in fmt:
+            self._outline_width = int(fmt["outline_width"])
+        if "outline_color" in fmt:
+            self._outline_color = QColor(fmt["outline_color"])
+            if self._outline_width == 0 and "outline_width" not in fmt:
+                self._outline_width = 1
+        if "alignment" in fmt:
+            opt = self.document().defaultTextOption()
+            opt.setAlignment(Qt.AlignmentFlag(fmt["alignment"]))
+            self.document().setDefaultTextOption(opt)
+        if "line_spacing_percent" in fmt:
+            pct = fmt["line_spacing_percent"]
+            block_fmt = QTextBlockFormat()
+            block_fmt.setLineHeight(pct, QTextBlockFormat.ProportionalHeight)
+            cursor = QTextCursor(self.document())
+            cursor.select(QTextCursor.Document)
+            cursor.mergeBlockFormat(block_fmt)
+
+    def get_format(self) -> dict:
+        """Ritorna il formato corrente."""
+        f = self.font()
+        opt = self.document().defaultTextOption()
+        align = opt.alignment()
+        return {
+            "font_family": f.family(),
+            "font_size": f.pointSize(),
+            "bold": f.bold(),
+            "italic": f.italic(),
+            "underline": f.underline(),
+            "alignment": align,
+            "text_color": QColor(self._color),
+            "fill_color": QColor(self._fill_color),
+            "opacity": self.opacity(),
+            "outline_width": self._outline_width,
+            "outline_color": QColor(self._outline_color),
+            "line_spacing_percent": 100,
+        }
 
     def setDrawColor(self, c: QColor):
         self._color = c
@@ -738,12 +810,43 @@ class DrawableText(QGraphicsTextItem):
         self.setFocus(Qt.MouseFocusReason)
         super().mouseDoubleClickEvent(event)
 
+    def sceneEvent(self, event):
+        """Tasto destro: inoltra alla view per mostrare menu Personalizzazione/Duplica/Elimina."""
+        if event.type() == QEvent.GraphicsSceneContextMenu:
+            views = self.scene().views() if self.scene() else []
+            if views:
+                overlay = views[0]
+                if hasattr(overlay, "_show_context_menu"):
+                    sp = event.screenPos()
+                    global_pos = QPoint(int(sp.x()), int(sp.y()))
+                    overlay._show_context_menu(global_pos, self)
+                    event.accept()
+                    return True
+        return super().sceneEvent(event)
+
     def paint(self, painter, option, widget):
+        br = self.boundingRect()
+        # Sfondo riempimento (se colore con alpha > 0)
+        if self._fill_color.alpha() > 0:
+            painter.fillRect(br, QBrush(self._fill_color))
+        # Contorno testo (outline): disegna il documento più volte con offset
+        if self._outline_width > 0:
+            old_color = self.defaultTextColor()
+            self.setDefaultTextColor(self._outline_color)
+            offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+            for dx, dy in offsets:
+                sx = dx * self._outline_width
+                sy = dy * self._outline_width
+                painter.save()
+                painter.translate(sx, sy)
+                self.document().drawContents(painter, br.adjusted(-20, -20, 20, 20))
+                painter.restore()
+            self.setDefaultTextColor(old_color)
         super().paint(painter, option, widget)
         if self.isSelected() and self.textInteractionFlags() == Qt.NoTextInteraction:
             painter.setPen(QPen(QColor(255, 255, 255), 3, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self.boundingRect())
+            painter.drawRect(br)
 
 
 class DrawableFreehand(QGraphicsPathItem):
@@ -965,6 +1068,628 @@ def _deserialize_font(d: dict) -> QFont:
     return font
 
 
+# Pulsante X: contorno rotondo, sfondo teal molto sfumato
+_TITLE_BAR_CLOSE_BTN_STYLE = """
+    QPushButton#titleBarCloseBtn {
+        background: qradialgradient(cx:0.5, cy:0.5, radius:0.6, fx:0.5, fy:0.5,
+            stop:0 rgba(0, 255, 200, 0.12),
+            stop:0.6 rgba(0, 255, 200, 0.04),
+            stop:1 rgba(0, 255, 200, 0));
+        color: #E6F1FF;
+        border: 1px solid rgba(0, 255, 200, 0.4);
+        border-radius: 16px;
+        font-size: 22px;
+        font-weight: 700;
+    }
+    QPushButton#titleBarCloseBtn:hover {
+        background: qradialgradient(cx:0.5, cy:0.5, radius:0.6, fx:0.5, fy:0.5,
+            stop:0 rgba(0, 255, 200, 0.12),
+            stop:0.6 rgba(0, 255, 200, 0.04),
+            stop:1 rgba(0, 255, 200, 0));
+        color: #FFFFFF;
+        border: 1px solid rgba(0, 255, 200, 0.4);
+    }
+"""
+
+
+class _CloseButtonWithHover(QPushButton):
+    """Pulsante X con animazione scale 1.05 su hover (150ms)."""
+    _SIZE_NORMAL = 32
+    _SIZE_HOVER = 34  # ~1.06x per effetto scale
+
+    def __init__(self, parent=None):
+        super().__init__("×", parent)
+        self.setMinimumSize(self._SIZE_NORMAL, self._SIZE_NORMAL)
+        self.setMaximumSize(self._SIZE_NORMAL, self._SIZE_NORMAL)
+        self.setObjectName("titleBarCloseBtn")
+        self.setStyleSheet(_TITLE_BAR_CLOSE_BTN_STYLE)
+        self.setCursor(Qt.PointingHandCursor)
+        self._anim_min = QPropertyAnimation(self, b"minimumSize")
+        self._anim_max = QPropertyAnimation(self, b"maximumSize")
+        for a in (self._anim_min, self._anim_max):
+            a.setDuration(150)
+            a.setEasingCurve(QEasingCurve.OutCubic)
+        self._scale_group = QParallelAnimationGroup(self)
+        self._scale_group.addAnimation(self._anim_min)
+        self._scale_group.addAnimation(self._anim_max)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        s = QSize(self._SIZE_NORMAL, self._SIZE_NORMAL)
+        e = QSize(self._SIZE_HOVER, self._SIZE_HOVER)
+        self._anim_min.setStartValue(s)
+        self._anim_min.setEndValue(e)
+        self._anim_max.setStartValue(s)
+        self._anim_max.setEndValue(e)
+        self._scale_group.start()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        s = QSize(self._SIZE_HOVER, self._SIZE_HOVER)
+        e = QSize(self._SIZE_NORMAL, self._SIZE_NORMAL)
+        self._anim_min.setStartValue(s)
+        self._anim_min.setEndValue(e)
+        self._anim_max.setStartValue(s)
+        self._anim_max.setEndValue(e)
+        self._scale_group.start()
+
+
+class GradientTitleBar(QWidget):
+    """Barra titolo con pulsante chiudi - sfondo uniforme al contenuto."""
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._parent_dialog = parent
+        self._drag_pos = None
+        self.setFixedHeight(42)
+        self.setCursor(Qt.ArrowCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 12, 0)
+        layout.setSpacing(8)
+        self._label = QLabel(title)
+        self._label.setStyleSheet("color: #e5e7eb; font-size: 14px; font-weight: 600;")
+        layout.addWidget(self._label)
+        layout.addStretch()
+        close_btn = _CloseButtonWithHover(self)
+        close_btn.clicked.connect(lambda: parent.reject() if parent else None)
+        layout.addWidget(close_btn)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), QColor(15, 20, 25))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPos()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() == Qt.LeftButton and self._parent_dialog:
+            delta = event.globalPos() - self._drag_pos
+            self._parent_dialog.move(self._parent_dialog.pos() + delta)
+            self._drag_pos = event.globalPos()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = None
+
+
+def _set_rounded_mask(widget: QWidget, radius: int = 12):
+    """Applica angoli arrotondati alla finestra."""
+    try:
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(widget.rect()), radius, radius)
+        polyf = path.toFillPolygon()
+        poly = QPolygon()
+        for i in range(polyf.size()):
+            pt = polyf.at(i)
+            poly.append(QPoint(int(pt.x()), int(pt.y())))
+        widget.setMask(QRegion(poly))
+    except Exception:
+        pass
+
+
+class _RoundedDialogFilter(QObject):
+    """Event filter per applicare mask angoli arrotondati su Show/Resize."""
+    def __init__(self, radius=12):
+        super().__init__()
+        self._radius = radius
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Show or event.type() == QEvent.Resize:
+            try:
+                path = QPainterPath()
+                path.addRoundedRect(QRectF(obj.rect()), self._radius, self._radius)
+                polyf = path.toFillPolygon()
+                poly = QPolygon()
+                for i in range(polyf.size()):
+                    pt = polyf.at(i)
+                    poly.append(QPoint(int(pt.x()), int(pt.y())))
+                obj.setMask(QRegion(poly))
+            except Exception:
+                pass
+        return False
+
+
+class _DialogFadeInFilter(QObject):
+    """Event filter per fade-in 150ms quando il dialog si apre."""
+    def __init__(self, dialog: QDialog):
+        self._dialog = dialog
+        self._done = False
+        super().__init__(dialog)
+
+    def eventFilter(self, obj, event):
+        dialog = getattr(self, "_dialog", None)
+        if dialog is not None and obj is dialog and event.type() == QEvent.Show and not self._done:
+            self._done = True
+            eff = QGraphicsOpacityEffect(dialog)
+            eff.setOpacity(0.0)
+            dialog.setGraphicsEffect(eff)
+            anim = QPropertyAnimation(eff, b"opacity")
+            anim.setDuration(150)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+
+            def on_finished():
+                dialog.setGraphicsEffect(None)
+
+            anim.finished.connect(on_finished)
+            anim.start()
+            self._fade_anim = anim  # keep ref
+        return False
+
+
+def _apply_pes_title_bar(dialog: QDialog, title: str):
+    """Aggiunge header, angoli arrotondati e fade-in a un dialog."""
+    dialog.setWindowFlags(dialog.windowFlags() | Qt.FramelessWindowHint)
+    layout = dialog.layout()
+    if layout is not None:
+        bar = GradientTitleBar(title, dialog)
+        layout.insertWidget(0, bar)
+    dialog._round_filter = _RoundedDialogFilter()
+    dialog.installEventFilter(dialog._round_filter)
+    dialog._fade_filter = _DialogFadeInFilter(dialog)
+    dialog.installEventFilter(dialog._fade_filter)
+
+
+class _TransparentSwatchButton(QPushButton):
+    """Quadretto a scacchi per selezionare colore trasparente nel color picker."""
+    def __init__(self, dialog: QColorDialog, parent=None):
+        super().__init__(parent)
+        self._dialog = dialog
+        self.setFixedSize(36, 28)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Sfondo trasparente")
+        self.clicked.connect(self._on_click)
+
+    def _on_click(self):
+        self._dialog.setCurrentColor(QColor(0, 0, 0, 0))
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, False)
+        sq = 4
+        for i in range(0, self.width(), sq):
+            for j in range(0, self.height(), sq):
+                light = ((i // sq) + (j // sq)) % 2 == 0
+                p.fillRect(i, j, sq, sq, QColor(255, 255, 255) if light else QColor(200, 200, 200))
+        p.setPen(QPen(QColor(0x37, 0x41, 0x51)))
+        p.drawRect(0, 0, self.width() - 1, self.height() - 1)
+
+
+def pick_color_pes(parent, initial: QColor, allow_alpha: bool = False) -> QColor:
+    """Apre QColorDialog con stile PES. Ritorna il colore selezionato o QColor invalido se annullato.
+    Se allow_alpha=True, mostra il selettore alpha e un quadretto a scacchi per sfondo trasparente."""
+    cd = QColorDialog(initial, parent)
+    if allow_alpha:
+        cd.setOption(QColorDialog.ShowAlphaChannel)
+    cd.setStyleSheet("""
+        QColorDialog { background: #0f1419; border-radius: 12px; border: 1px solid rgba(55, 65, 81, 0.8); }
+        QColorDialog QWidget { background: #0f1419; color: #e5e7eb; }
+        QPushButton { background: #1a2332; color: #e5e7eb; border: 1px solid #374151;
+            border-radius: 6px; padding: 6px 14px; }
+        QPushButton:hover { background: rgba(18, 168, 138, 0.2); border-color: #12a88a; }
+        QPushButton#titleBarCloseBtn {
+            background: rgba(0, 255, 200, 0.15); color: #E6F1FF; border: 1px solid rgba(0, 255, 200, 0.4);
+            border-radius: 50%; font-size: 22px; font-weight: 700; padding: 0;
+        }
+        QPushButton#titleBarCloseBtn:hover { color: #FFFFFF; }
+    """)
+    _apply_pes_title_bar(cd, "Scegli colore")
+    if allow_alpha:
+        lay = cd.layout()
+        if lay is not None:
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Trasparente:"))
+            swatch = _TransparentSwatchButton(cd, cd)
+            swatch.setStyleSheet("background: transparent; border: none;")
+            row.addWidget(swatch)
+            row.addStretch()
+            row_w = QWidget()
+            row_w.setLayout(row)
+            row_w.setStyleSheet("background: #0f1419; color: #e5e7eb;")
+            lay.insertWidget(1, row_w)
+    if cd.exec_() == QDialog.Accepted:
+        c = cd.selectedColor()
+        if c.isValid():
+            return c
+    return QColor()
+
+
+class StyledIntDialog(QDialog):
+    """Dialog per numero intero con header PES (sostituisce QInputDialog.getInt)."""
+    def __init__(self, title: str, label: str, value: int, min_val: int, max_val: int, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setStyleSheet(_DIALOG_STYLE)
+        self.setWindowTitle(title)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(GradientTitleBar(title, self))
+
+        content = QWidget()
+        content.setStyleSheet("background: #0f1419;")
+        c_layout = QVBoxLayout(content)
+        c_layout.setContentsMargins(20, 16, 20, 20)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        self._spin = QSpinBox()
+        self._spin.setRange(min_val, max_val)
+        self._spin.setValue(value)
+        row.addWidget(self._spin)
+        row.addStretch()
+        c_layout.addLayout(row)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Annulla")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("btnAccent")
+        ok_btn.clicked.connect(self.accept)
+        btn_row.addWidget(ok_btn)
+        c_layout.addLayout(btn_row)
+        layout.addWidget(content)
+        self._round_filter = _RoundedDialogFilter()
+        self.installEventFilter(self._round_filter)
+        self._fade_filter = _DialogFadeInFilter(self)
+        self.installEventFilter(self._fade_filter)
+
+    def value(self) -> int:
+        return self._spin.value()
+
+
+# Stile PES per dialog colore/spessore
+_DIALOG_STYLE = """
+    QDialog {
+        background: #0f1419;
+        border-radius: 12px;
+        border: 1px solid rgba(55, 65, 81, 0.8);
+    }
+    QLabel {
+        color: #e5e7eb;
+        font-size: 13px;
+        font-weight: 500;
+    }
+    QPushButton {
+        background: #1a2332;
+        color: #e5e7eb;
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 10px 20px;
+        font-size: 13px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        background: rgba(18, 168, 138, 0.2);
+        border-color: #12a88a;
+        color: #19e6c1;
+    }
+    QPushButton#btnAccent {
+        background: #12a88a;
+        color: white;
+        border-color: #12a88a;
+    }
+    QPushButton#btnAccent:hover {
+        background: #0f9378;
+    }
+    QPushButton#titleBarCloseBtn {
+        background: rgba(0, 255, 200, 0.15); color: #E6F1FF; border: 1px solid rgba(0, 255, 200, 0.4);
+        border-radius: 50%; font-size: 22px; font-weight: 700; padding: 0;
+    }
+    QPushButton#titleBarCloseBtn:hover { color: #FFFFFF; }
+    QSpinBox {
+        background: #1a2332;
+        color: #e5e7eb;
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 13px;
+        min-width: 60px;
+    }
+    QSpinBox:focus {
+        border-color: #12a88a;
+    }
+"""
+
+
+class ColorAndThicknessDialog(QDialog):
+    """Dialog unificato colore + spessore - stile Pro Evolution Soccer."""
+    def __init__(self, initial_color: QColor, initial_thickness: int, has_thickness: bool, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Colore e spessore")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setStyleSheet(_DIALOG_STYLE)
+        self.setFixedSize(320, has_thickness and 220 or 180)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Header con sfumatura
+        self._title_bar = GradientTitleBar("Colore e spessore", self)
+        layout.addWidget(self._title_bar)
+
+        # Contenuto
+        content = QWidget()
+        content.setStyleSheet("background: #0f1419;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(16)
+        content_layout.setContentsMargins(20, 16, 20, 20)
+
+        # Riga colore
+        color_row = QHBoxLayout()
+        color_row.addWidget(QLabel("Colore:"))
+        self._color_btn = QPushButton()
+        self._color_btn.setFixedSize(40, 32)
+        self._color_btn.setCursor(Qt.PointingHandCursor)
+        self._color_btn.clicked.connect(self._pick_color)
+        self._color = initial_color
+        self._update_color_btn()
+        color_row.addWidget(self._color_btn)
+        color_row.addStretch()
+        content_layout.addLayout(color_row)
+
+        # Riga spessore (solo se ha linea)
+        self._thickness_spin = None
+        if has_thickness:
+            thick_row = QHBoxLayout()
+            thick_row.addWidget(QLabel("Spessore (px):"))
+            self._thickness_spin = QSpinBox()
+            self._thickness_spin.setRange(1, 20)
+            self._thickness_spin.setValue(initial_thickness)
+            thick_row.addWidget(self._thickness_spin)
+            thick_row.addStretch()
+            content_layout.addLayout(thick_row)
+
+        # Pulsanti
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Annulla")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("btnAccent")
+        ok_btn.clicked.connect(self.accept)
+        btn_row.addWidget(ok_btn)
+        content_layout.addLayout(btn_row)
+
+        layout.addWidget(content)
+        self._round_filter = _RoundedDialogFilter()
+        self.installEventFilter(self._round_filter)
+        self._fade_filter = _DialogFadeInFilter(self)
+        self.installEventFilter(self._fade_filter)
+
+    def _pick_color(self):
+        cd = QColorDialog(self._color, self)
+        cd.setWindowTitle("Scegli colore")
+        cd.setStyleSheet("""
+            QColorDialog { background: #0f1419; border-radius: 12px; border: 1px solid rgba(55, 65, 81, 0.8); }
+            QColorDialog QWidget { background: #0f1419; color: #e5e7eb; }
+            QPushButton { background: #1a2332; color: #e5e7eb; border: 1px solid #374151;
+                border-radius: 6px; padding: 6px 14px; }
+            QPushButton:hover { background: rgba(18, 168, 138, 0.2); border-color: #12a88a; }
+            QPushButton#titleBarCloseBtn {
+                background: rgba(0, 255, 200, 0.15); color: #E6F1FF; border: 1px solid rgba(0, 255, 200, 0.4);
+                border-radius: 50%; font-size: 22px; font-weight: 700; padding: 0;
+            }
+            QPushButton#titleBarCloseBtn:hover { color: #FFFFFF; }
+        """)
+        _apply_pes_title_bar(cd, "Scegli colore")
+        if cd.exec_() == QDialog.Accepted:
+            c = cd.selectedColor()
+            if c.isValid():
+                self._color = c
+                self._update_color_btn()
+
+    def _update_color_btn(self):
+        self._color_btn.setStyleSheet(
+            f"background: {self._color.name()}; border: 2px solid #374151; border-radius: 6px;"
+        )
+
+    def get_color(self) -> QColor:
+        return self._color
+
+    def get_thickness(self) -> int:
+        return self._thickness_spin.value() if self._thickness_spin else 8
+
+
+class TextPersonalizeDialog(QDialog):
+    """Dialog Personalizzazione testo: colore, sfondo, font, grassetto, corsivo, sottolineato."""
+    def __init__(self, target: "DrawableText", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Personalizzazione testo")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setStyleSheet(_DIALOG_STYLE)
+        self.setFixedSize(400, 400)
+        self._target = target
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(GradientTitleBar("Personalizzazione testo", self))
+
+        content = QWidget()
+        content.setStyleSheet("background: #0f1419;")
+        c = QVBoxLayout(content)
+        c.setSpacing(12)
+        c.setContentsMargins(20, 16, 20, 20)
+
+        # Colore testo
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Colore testo:"))
+        self._text_color_btn = QPushButton()
+        self._text_color_btn.setFixedSize(40, 28)
+        self._text_color_btn.setCursor(Qt.PointingHandCursor)
+        self._text_color_btn.clicked.connect(self._pick_text_color)
+        self._text_color = QColor(target._color)
+        self._update_text_color_btn()
+        r1.addWidget(self._text_color_btn)
+        r1.addStretch()
+        c.addLayout(r1)
+
+        # Colore sfondo cella
+        r2 = QHBoxLayout()
+        r2.addWidget(QLabel("Colore sfondo cella:"))
+        self._fill_color_btn = QPushButton()
+        self._fill_color_btn.setFixedSize(40, 28)
+        self._fill_color_btn.setCursor(Qt.PointingHandCursor)
+        self._fill_color_btn.clicked.connect(self._pick_fill_color)
+        self._fill_color = QColor(target._fill_color)
+        self._update_fill_color_btn()
+        r2.addWidget(self._fill_color_btn)
+        r2.addStretch()
+        c.addLayout(r2)
+
+        # Font
+        r3 = QHBoxLayout()
+        r3.addWidget(QLabel("Font:"))
+        self._font_combo = QComboBox()
+        self._font_combo.setMinimumWidth(240)
+        self._font_combo.setStyleSheet("""
+            QComboBox {
+                background: #1a2332;
+                color: #e5e7eb;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 24px;
+            }
+            QComboBox:hover { border-color: #12a88a; }
+            QComboBox::drop-down {
+                border: none;
+                padding-right: 8px;
+            }
+            QComboBox QAbstractItemView {
+                background: #ffffff;
+                color: #1a2332;
+                selection-background-color: #e5e7eb;
+                selection-color: #0f1419;
+                padding: 4px;
+                min-width: 180px;
+            }
+        """)
+        fonts = ["Arial", "Segoe UI", "Calibri", "Verdana", "Georgia", "Times New Roman", "Courier New", "Impact"]
+        self._font_combo.addItems(fonts)
+        f = target.font()
+        idx = self._font_combo.findText(f.family())
+        if idx >= 0:
+            self._font_combo.setCurrentIndex(idx)
+        else:
+            self._font_combo.setCurrentIndex(0)
+        r3.addWidget(self._font_combo, 1)
+        r3.addStretch()
+        c.addLayout(r3)
+
+        # Dimensione
+        r3b = QHBoxLayout()
+        r3b.addWidget(QLabel("Dimensione:"))
+        self._size_spin = QSpinBox()
+        self._size_spin.setRange(8, 200)
+        self._size_spin.setValue(f.pointSize())
+        self._size_spin.setMinimumWidth(70)
+        r3b.addWidget(self._size_spin)
+        r3b.addStretch()
+        c.addLayout(r3b)
+
+        # Grassetto, Corsivo, Sottolineato
+        r4 = QHBoxLayout()
+        self._bold_cb = QCheckBox("Grassetto")
+        self._bold_cb.setChecked(f.bold())
+        self._bold_cb.setStyleSheet("color: #e5e7eb;")
+        r4.addWidget(self._bold_cb)
+        self._italic_cb = QCheckBox("Corsivo")
+        self._italic_cb.setChecked(f.italic())
+        self._italic_cb.setStyleSheet("color: #e5e7eb;")
+        r4.addWidget(self._italic_cb)
+        self._underline_cb = QCheckBox("Sottolineato")
+        self._underline_cb.setChecked(f.underline())
+        self._underline_cb.setStyleSheet("color: #e5e7eb;")
+        r4.addWidget(self._underline_cb)
+        r4.addStretch()
+        c.addLayout(r4)
+
+        # Pulsanti
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Annulla")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("btnAccent")
+        ok_btn.clicked.connect(self.accept)
+        btn_row.addWidget(ok_btn)
+        c.addLayout(btn_row)
+
+        layout.addWidget(content)
+        self._round_filter = _RoundedDialogFilter()
+        self.installEventFilter(self._round_filter)
+
+    def _pick_text_color(self):
+        c = pick_color_pes(self, self._text_color)
+        if c.isValid():
+            self._text_color = c
+            self._update_text_color_btn()
+
+    def _pick_fill_color(self):
+        initial = self._fill_color if self._fill_color.alpha() > 0 else QColor(128, 128, 128, 0)
+        c = pick_color_pes(self, initial, allow_alpha=True)
+        if c.isValid():
+            self._fill_color = c
+            self._update_fill_color_btn()
+
+    def _update_text_color_btn(self):
+        self._text_color_btn.setStyleSheet(
+            f"background: {self._text_color.name()}; border: 2px solid #374151; border-radius: 6px;"
+        )
+
+    def _update_fill_color_btn(self):
+        if self._fill_color.alpha() == 0:
+            self._fill_color_btn.setStyleSheet(
+                "background: #1a2332; border: 1px dashed #374151; border-radius: 6px;"
+            )
+        else:
+            self._fill_color_btn.setStyleSheet(
+                f"background: {self._fill_color.name()}; border: 2px solid #374151; border-radius: 6px;"
+            )
+
+    def get_format(self) -> dict:
+        """Ritorna il formato selezionato."""
+        return {
+            "text_color": QColor(self._text_color),
+            "fill_color": QColor(self._fill_color),
+            "font_family": self._font_combo.currentText(),
+            "font_size": self._size_spin.value(),
+            "bold": self._bold_cb.isChecked(),
+            "italic": self._italic_cb.isChecked(),
+            "underline": self._underline_cb.isChecked(),
+        }
+
+
 class DrawingOverlay(QGraphicsView):
     """Widget overlay trasparente per disegnare sul video - stile Kinovea."""
     drawingAdded = pyqtSignal(object)
@@ -973,6 +1698,7 @@ class DrawingOverlay(QGraphicsView):
     zoomRequested = pyqtSignal(int, int, int)  # delta, mouse_x, mouse_y (in coords overlay)
     annotationDeleted = pyqtSignal(str, int)  # event_id, ann_index (per displayed items)
     annotationModified = pyqtSignal(str, int, object)  # event_id, ann_index, new_data (dopo move/resize)
+    emptyAreaLeftClicked = pyqtSignal(int, int)  # x, y - quando tool=NONE e click fuori dalle forme (per Web UI)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -985,6 +1711,9 @@ class DrawingOverlay(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        # Event filter su view e viewport per intercettare right-click
+        self.viewport().installEventFilter(self)
+        self.installEventFilter(self)
 
         self._tool = DrawTool.NONE
         self._color = QColor("#FFFF00")
@@ -1010,6 +1739,7 @@ class DrawingOverlay(QGraphicsView):
         self._move_start_scene = None
         self._move_start_item_pos = None
         self._move_target_item = None  # item in trascinamento (testo o forma con maniglie)
+        self._default_text_format: dict = {}  # formato per nuovo testo da TextFormatToolbar
 
         sc_copy = QShortcut(QKeySequence.Copy, self, self._copy_selected)
         sc_paste = QShortcut(QKeySequence.Paste, self, self._paste)
@@ -1146,7 +1876,14 @@ class DrawingOverlay(QGraphicsView):
             return {"type": "polygon", "points": poly, "pos": pos, "color": item._color,
                     "fill_style": item._fill_style.value, "opacity": item._opacity}
         if isinstance(item, DrawableText):
-            return {"type": "text", "text": item.toPlainText(), "pos": pos, "color": item._color, "font": item.font()}
+            fmt = item.get_format()
+            fc = fmt.get("fill_color")
+            fill_hex = fc.name() if isinstance(fc, QColor) and fc.alpha() > 0 else None
+            oc = fmt.get("outline_color")
+            outline_hex = oc.name() if isinstance(oc, QColor) else None
+            return {"type": "text", "text": item.toPlainText(), "pos": pos, "color": item._color,
+                    "font": item.font(), "fill_color": fill_hex, "opacity": fmt.get("opacity", 1.0),
+                    "outline_width": fmt.get("outline_width", 0), "outline_color": outline_hex}
         if isinstance(item, DrawableFreehand):
             return {"type": "freehand", "path": QPainterPath(item.path()), "pos": pos,
                     "color": item._color, "pen_width": item.pen().width()}
@@ -1209,6 +1946,14 @@ class DrawingOverlay(QGraphicsView):
             item = DrawableText(data.get("text", ""), data["color"])
             if "font" in data and data["font"]:
                 item.setFont(data["font"])
+            if "fill_color" in data and data["fill_color"]:
+                item._fill_color = QColor(str(data["fill_color"]))
+            if "opacity" in data:
+                item.setOpacity(float(data["opacity"]))
+            if "outline_width" in data and data["outline_width"]:
+                item._outline_width = int(data["outline_width"])
+            if "outline_color" in data and data["outline_color"]:
+                item._outline_color = QColor(str(data["outline_color"]))
             item.setPos(new_pos)
             return item
         if t == "freehand":
@@ -1261,6 +2006,28 @@ class DrawingOverlay(QGraphicsView):
 
     def penWidth(self) -> int:
         return self._pen_width
+
+    def set_default_text_format(self, fmt: dict):
+        """Formato predefinito per nuovo testo (da TextFormatToolbar)."""
+        self._default_text_format = dict(fmt) if fmt else {}
+
+    def apply_format_to_selected_text(self, fmt: dict):
+        """Applica formato al testo selezionato (se presente)."""
+        item = self.get_selected_text_item()
+        if item:
+            item.apply_format(fmt)
+            item.update()
+
+    def get_selected_text_item(self) -> Optional["DrawableText"]:
+        """Ritorna il DrawableText selezionato o con focus, se presente."""
+        fi = self.scene().focusItem()
+        if isinstance(fi, DrawableText):
+            return fi
+        sel = self.scene().selectedItems()
+        for it in sel:
+            if isinstance(it, DrawableText):
+                return it
+        return None
 
     def setArrowLineStyle(self, style: ArrowLineStyle):
         self._arrow_line_style = style
@@ -1325,6 +2092,12 @@ class DrawingOverlay(QGraphicsView):
                 self._resize_drag_handle_index = None
                 self._is_moving = False
                 self._move_target_item = None
+                # Tool NONE + click su area vuota: segnale per Web UI (video click)
+                if self._tool == DrawTool.NONE:
+                    scene_pos = self.mapToScene(event.pos())
+                    self.emptyAreaLeftClicked.emit(int(scene_pos.x()), int(scene_pos.y()))
+                    event.accept()
+                    return
         if event.button() == Qt.LeftButton and self._tool == DrawTool.POLYGON:
             scene_pos = self.mapToScene(event.pos())
             self._start_freeze()
@@ -1344,7 +2117,11 @@ class DrawingOverlay(QGraphicsView):
             scene_pos = self.mapToScene(event.pos())
             self._clear_resize_handles()
             self._start_freeze()
-            item = DrawableText("", QColor(Qt.white))
+            fmt = self._default_text_format
+            color = fmt.get("text_color", QColor(Qt.white)) if fmt else QColor(Qt.white)
+            item = DrawableText("", color)
+            if fmt:
+                item.apply_format(fmt)
             item.setPos(scene_pos)
             item.setTextInteractionFlags(Qt.TextEditorInteraction)
             item._confirm_callback = lambda it=item: self._emit_text_confirmed(it)
@@ -1363,11 +2140,57 @@ class DrawingOverlay(QGraphicsView):
             if self._tool == DrawTool.PENCIL:
                 self._pencil_path = QPainterPath()
                 self._pencil_path.moveTo(scene_pos)
-        elif event.button() == Qt.RightButton:
-            item = self.scene().itemAt(self.mapToScene(event.pos()), self.transform())
-            self._show_context_menu(event.globalPos(), item)
-            return
         super().mousePressEvent(event)
+
+    def eventFilter(self, obj, event):
+        """Intercetta right-click per menu contestuale sul testo."""
+        if obj not in (self, self.viewport()):
+            return super().eventFilter(obj, event)
+        # ContextMenu oppure MouseButtonPress con destro (prima che la view lo converta in scene event)
+        is_right_click = (
+            event.type() == QEvent.ContextMenu or
+            (event.type() == QEvent.MouseButtonPress and event.button() == Qt.RightButton)
+        )
+        if is_right_click:
+            import logging
+            logging.debug(f"[DRAW] Right-click ricevuto: obj={type(obj).__name__} event={event.type()}")
+            # event.pos() è relativo a obj; converti in coordinate view
+            view_pos = obj.mapTo(self, event.pos()) if obj is self.viewport() else event.pos()
+            scene_pos = self.mapToScene(view_pos)
+            tol = 25
+            r = QRectF(scene_pos.x() - tol, scene_pos.y() - tol, tol * 2, tol * 2)
+            target = None
+            for it in self.scene().items(r, Qt.IntersectsItemShape, Qt.DescendingOrder):
+                if it in self._items or it in self._displayed_items:
+                    target = it
+                    break
+                t = self._find_drawable_item(it)
+                if t is not None:
+                    target = t
+                    break
+            gp = event.globalPos()
+            global_pt = QPoint(gp.x(), gp.y()) if hasattr(gp, 'x') else self.mapToGlobal(event.pos())
+            self._show_context_menu(global_pt, target)
+            event.accept()
+            return True  # Consuma l'evento, impedisce elaborazione successiva
+        return super().eventFilter(obj, event)
+
+    def _on_context_menu_requested(self, view_pos):
+        """Chiamato su tasto destro. view_pos è in coordinate della view."""
+        scene_pos = self.mapToScene(view_pos)
+        tol = 20
+        r = QRectF(scene_pos.x() - tol, scene_pos.y() - tol, tol * 2, tol * 2)
+        target = None
+        for it in self.scene().items(r, Qt.IntersectsItemShape, Qt.DescendingOrder):
+            if it in self._items or it in self._displayed_items:
+                target = it
+                break
+            t = self._find_drawable_item(it)
+            if t is not None:
+                target = t
+                break
+        global_pos = self.mapToGlobal(view_pos)
+        self._show_context_menu(global_pos, target)
 
     def mouseDoubleClickEvent(self, event):
         """Doppio clic con strumento Poligono: chiude il poligono."""
@@ -1418,24 +2241,94 @@ class DrawingOverlay(QGraphicsView):
         self._polygon_points = []
         self._remove_polygon_preview()
 
+    # Stile menu contestuale (tipo Pro Evolution Soccer: elegante, scuro, arrotondato)
+    _CONTEXT_MENU_STYLE = """
+        QMenu {
+            background: rgba(15, 20, 25, 0.96);
+            border: 1px solid rgba(55, 65, 81, 0.8);
+            border-radius: 10px;
+            padding: 6px 2px;
+            min-width: 200px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        QMenu::item {
+            padding: 10px 20px;
+            color: #e5e7eb;
+            border-radius: 6px;
+            margin: 1px 6px;
+        }
+        QMenu::item:selected {
+            background: rgba(18, 168, 138, 0.25);
+            color: #19e6c1;
+        }
+        QMenu::item:disabled {
+            color: #6b7280;
+        }
+        QMenu::separator {
+            height: 1px;
+            background: rgba(55, 65, 81, 0.6);
+            margin: 6px 12px;
+        }
+    """
+
     def _show_context_menu(self, pos, item):
         """Menu contestuale sul tasto destro."""
         target = self._find_drawable_item(item)
         if target is None or (target not in self._items and target not in self._displayed_items):
             return
+        is_text = isinstance(target, DrawableText)
+
+        # Testo: menu Personalizzazione, Duplica, Elimina
+        if is_text:
+            menu = QMenu(self)
+            menu.setStyleSheet(self._CONTEXT_MENU_STYLE)
+            personalizza_action = menu.addAction("Personalizzazione")
+            menu.addSeparator()
+            duplica_action = menu.addAction("Duplica")
+            menu.addSeparator()
+            elimina_action = menu.addAction("Elimina")
+            action = menu.exec_(pos)
+            if action == personalizza_action:
+                dlg = TextPersonalizeDialog(target, self)
+                if dlg.exec_() == QDialog.Accepted:
+                    fmt = dlg.get_format()
+                    target.apply_format(fmt)
+                    target.update()
+                    self.set_default_text_format(fmt)
+                    self._persist_displayed_item_if_needed(target)
+            elif action == duplica_action:
+                data = self._item_to_copy_data(target)
+                if data:
+                    new_item = self._copy_data_to_item(data, offset_x=15, offset_y=15)
+                    if new_item:
+                        self.scene().addItem(new_item)
+                        self._items.append(new_item)
+                        self.drawingAdded.emit(new_item)
+                        self._select_shape(new_item)
+            elif action == elimina_action:
+                ref = target.data(Qt.UserRole) if hasattr(target, "data") else None
+                if isinstance(ref, dict) and "event_id" in ref and "ann_index" in ref:
+                    self.annotationDeleted.emit(ref["event_id"], ref["ann_index"])
+                if target in self._items:
+                    self._items.remove(target)
+                if target in self._displayed_items:
+                    self._displayed_items.remove(target)
+                self._safe_remove_item(target)
+                self._clear_resize_handles()
+            return
+
         menu = QMenu(self)
-        color_action = menu.addAction("Modifica colore")
+        menu.setStyleSheet(self._CONTEXT_MENU_STYLE)
         has_line = isinstance(target, (DrawableCircle, DrawableRectangle, DrawableArrow,
                                        DrawableLine, DrawableFreehand,
                                        DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow))
-        thickness_action = menu.addAction("Modifica spessore linea") if has_line else None
+        has_thickness = has_line or isinstance(target, DrawablePolygon)
+        style_action = menu.addAction("Colore e spessore") if has_thickness else menu.addAction("Modifica colore")
         is_polygon = isinstance(target, DrawablePolygon)
         fill_solid_action = menu.addAction("Fill pieno trasparente") if is_polygon else None
         fill_stripes_action = menu.addAction("Fill a righe") if is_polygon else None
         opacity_action = menu.addAction("Opacità...") if is_polygon else None
-        is_text = isinstance(target, DrawableText)
-        font_action = menu.addAction("Modifica font") if is_text else None
-        font_size_action = menu.addAction("Modifica dimensione testo") if is_text else None
         menu.addSeparator()
         duplica_action = menu.addAction("Duplica")
         menu.addSeparator()
@@ -1451,9 +2344,38 @@ class DrawingOverlay(QGraphicsView):
             self._persist_displayed_item_if_needed(target)
         elif action == opacity_action and is_polygon:
             cur = int(target._opacity * 100)
-            v, ok = QInputDialog.getInt(self, "Opacità", "Opacità (20-60%):", cur, 20, 60)
-            if ok:
+            dlg = StyledIntDialog("Opacità", "Opacità (20-60%):", cur, 20, 60, self)
+            if dlg.exec_() == QDialog.Accepted:
+                v = dlg.value()
                 target.setOpacity(v / 100.0)
+                target.update()
+                self._persist_displayed_item_if_needed(target)
+        elif action == style_action:
+            current_color = target._color if hasattr(target, "_color") else target.pen().color()
+            if isinstance(target, (DrawableArrow, DrawableLine)):
+                current_thick = target._width
+            elif isinstance(target, (DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
+                current_thick = target._pen_width
+            elif isinstance(target, DrawablePolygon):
+                current_thick = int(target.pen().widthF()) if target.pen().widthF() > 0 else 2
+            else:
+                current_thick = int(target.pen().widthF()) if target.pen().widthF() > 0 else 8
+            dlg = ColorAndThicknessDialog(current_color, current_thick, has_thickness, self)
+            if dlg.exec_() == QDialog.Accepted:
+                c = dlg.get_color()
+                target.setDrawColor(c)
+                if hasattr(target, "_color"):
+                    target._color = c
+                if has_thickness:
+                    w = dlg.get_thickness()
+                    if isinstance(target, (DrawableArrow, DrawableLine)):
+                        target._width = w
+                        target._update_path()
+                    elif isinstance(target, (DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
+                        target._pen_width = w
+                        target._update_path()
+                    else:
+                        target.setPen(QPen(c, w))
                 target.update()
                 self._persist_displayed_item_if_needed(target)
         elif action == delete_action:
@@ -1466,48 +2388,6 @@ class DrawingOverlay(QGraphicsView):
                 self._displayed_items.remove(target)
             self._safe_remove_item(target)
             self._clear_resize_handles()
-        elif action == color_action:
-            c = QColorDialog.getColor(target._color, self, "Modifica colore")
-            if c.isValid():
-                target.setDrawColor(c)
-                target._color = c
-                target.update()
-                self._persist_displayed_item_if_needed(target)
-        elif action == thickness_action and has_line:
-            if isinstance(target, (DrawableArrow, DrawableLine)):
-                current = target._width
-            elif isinstance(target, (DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
-                current = target._pen_width
-            else:
-                current = int(target.pen().widthF()) if target.pen().widthF() > 0 else 8
-            w, ok = QInputDialog.getInt(self, "Modifica spessore", "Spessore (px):", current, 1, 20)
-            if ok:
-                if isinstance(target, (DrawableArrow, DrawableLine)):
-                    target._width = w
-                    target._update_path()
-                elif isinstance(target, (DrawableCurvedLine, DrawableCurvedArrow, DrawableParabolaArrow)):
-                    target._pen_width = w
-                    target._update_path()
-                else:
-                    color = target._color if hasattr(target, "_color") else target.pen().color()
-                    target.setPen(QPen(color, w))
-                target.update()
-                self._persist_displayed_item_if_needed(target)
-        elif action == font_action and is_text:
-            f, ok = QFontDialog.getFont(target.font(), self, "Modifica font")
-            if ok:
-                target.setFont(f)
-                target.update()
-                self._persist_displayed_item_if_needed(target)
-        elif action == font_size_action and is_text:
-            f = target.font()
-            current = f.pointSize()
-            w, ok = QInputDialog.getInt(self, "Modifica dimensione testo", "Dimensione (pt):", current, 8, 120)
-            if ok and w > 0:
-                f.setPointSize(w)
-                target.setFont(f)
-                target.update()
-                self._persist_displayed_item_if_needed(target)
         elif action == duplica_action:
             data = self._item_to_copy_data(target)
             if data:
@@ -1954,26 +2834,9 @@ class DrawingOverlay(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def contextMenuEvent(self, event):
-        """Gestione tasto destro - menu contestuale sugli oggetti."""
-        scene_pos = self.mapToScene(event.pos())
-        # Cerca in un'area attorno al punto per gestire percorsi sottili
-        tol = 15
-        r = QRectF(scene_pos.x() - tol, scene_pos.y() - tol, tol * 2, tol * 2)
-        items_at = self.scene().items(r, Qt.IntersectsItemShape, Qt.DescendingOrder)
-        target = None
-        for it in items_at:
-            if it in self._items:
-                target = it
-                break
-            t = self._find_drawable_item(it)
-            if t is not None:
-                target = t
-                break
-        if target is not None:
-            event.accept()
-            self._show_context_menu(event.globalPos(), target)
-        else:
-            event.accept()  # Non mostrare menu fuori dalle forme
+        """Fallback: se il sistema invia contextMenuEvent alla view."""
+        self._on_context_menu_requested(event.pos())
+        event.accept()
 
     def _update_resize_rect_item(self, item, new_rect: QRectF):
         """Aggiorna rect per ellipse/rect."""
@@ -2046,7 +2909,23 @@ class DrawingOverlay(QGraphicsView):
         self._clear_resize_handles()
 
     def chooseColor(self) -> QColor:
-        c = QColorDialog.getColor(self._color, self, "Scegli colore")
-        if c.isValid():
-            self._color = c
+        cd = QColorDialog(self._color, self)
+        cd.setWindowTitle("Scegli colore")
+        cd.setStyleSheet("""
+            QColorDialog { background: #0f1419; border-radius: 12px; border: 1px solid rgba(55, 65, 81, 0.8); }
+            QColorDialog QWidget { background: #0f1419; color: #e5e7eb; }
+            QPushButton { background: #1a2332; color: #e5e7eb; border: 1px solid #374151;
+                border-radius: 6px; padding: 6px 14px; }
+            QPushButton:hover { background: rgba(18, 168, 138, 0.2); border-color: #12a88a; }
+            QPushButton#titleBarCloseBtn {
+                background: rgba(0, 255, 200, 0.15); color: #E6F1FF; border: 1px solid rgba(0, 255, 200, 0.4);
+                border-radius: 50%; font-size: 22px; font-weight: 700; padding: 0;
+            }
+            QPushButton#titleBarCloseBtn:hover { color: #FFFFFF; }
+        """)
+        _apply_pes_title_bar(cd, "Scegli colore")
+        if cd.exec_() == QDialog.Accepted:
+            c = cd.selectedColor()
+            if c.isValid():
+                self._color = c
         return self._color

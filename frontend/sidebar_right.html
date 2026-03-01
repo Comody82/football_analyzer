@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clip e Statistiche</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="sidebar-body">
+    <div class="sidebar-container">
+        <div class="right-tabs">
+            <div class="right-tabs-header">
+                <button class="right-tab-btn" data-tab="statistiche" title="Statistiche">📊 Statistiche</button>
+                <button class="right-tab-btn active" data-tab="clip" title="Clip">▶ Clip</button>
+            </div>
+            <div class="right-tab-content" id="tabStatistiche">
+                <div class="stats-section">
+                    <p class="stats-intro">Le statistiche non sono collegate ai tasti evento. Usa Aggiorna per aggiornare.</p>
+                    <button class="btn-secondary" id="btnRefreshStats">🔄 Aggiorna statistiche</button>
+                    <div class="stats-output" id="statsOutput"></div>
+                </div>
+            </div>
+            <div class="right-tab-content active" id="tabClip">
+                <div class="sidebar-section">
+                    <h2 class="section-title">CLIP</h2>
+                    <div class="clips-container" id="clipsContainer">
+                        <!-- Clip cards generate dinamicamente -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QWebChannel bridge -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script src="script.js"></script>
+    <script>
+    (function() {
+        function initTabs() {
+            var btns = document.querySelectorAll('.right-tab-btn');
+            var contents = document.querySelectorAll('.right-tab-content');
+            for (var i = 0; i < btns.length; i++) {
+                btns[i].addEventListener('click', function() {
+                    var tabId = this.getAttribute('data-tab');
+                    for (var j = 0; j < btns.length; j++) btns[j].classList.remove('active');
+                    for (var k = 0; k < contents.length; k++) contents[k].classList.remove('active');
+                    this.classList.add('active');
+                    var targetId = tabId === 'statistiche' ? 'tabStatistiche' : 'tabClip';
+                    var target = document.getElementById(targetId);
+                    if (target) target.classList.add('active');
+                });
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initTabs);
+        } else {
+            initTabs();
+        }
+    })();
+    </script>
+</body>
+</html>

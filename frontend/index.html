@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Football Analyzer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <h1 class="app-title">⚽ Football Analyzer</h1>
+            <div class="header-status">
+                <span class="status-dot"></span>
+                <span class="status-text" id="statusText">Pronto</span>
+            </div>
+        </header>
+
+        <!-- Main Layout: 3 colonne -->
+        <div class="app-main">
+            <!-- Sidebar Sinistra - Eventi -->
+            <aside class="sidebar-left">
+                <div class="sidebar-section">
+                    <h2 class="section-title">EVENTI</h2>
+                    <button class="btn-accent btn-open-video" id="btnOpenVideo">
+                        📂 Apri Video
+                    </button>
+                    <div class="event-buttons" id="eventButtons">
+                        <!-- Eventi generati dinamicamente -->
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Centro - Controlli sotto video Qt -->
+            <main class="content-center">
+                <!-- Controlli sotto video -->
+                <div class="controls-section">
+                    <!-- Timeline Eventi Canvas -->
+                    <div class="timeline-canvas-section">
+                        <canvas id="timelineCanvas" class="timeline-canvas"></canvas>
+                    </div>
+
+                    <!-- Playback Controls -->
+                    <div class="playback-controls">
+                        <button class="btn-control" id="btnRestart" title="Riavvia">↺</button>
+                        <button class="btn-control" id="btnSpeed" title="Velocità">1x</button>
+                        <button class="btn-control" id="btnFrame" title="Frame">▶|</button>
+                        <button class="btn-control btn-play" id="btnPlay">▶</button>
+                        <button class="btn-control" id="btnPause">⏸</button>
+                        <button class="btn-control" id="btnRewind">-5s</button>
+                        <button class="btn-control" id="btnForward">+5s</button>
+                    </div>
+                    
+                    <!-- Timeline Slider -->
+                    <div class="timeline-slider">
+                        <div class="timeline-track">
+                            <div class="timeline-progress" id="timelineProgress"></div>
+                        </div>
+                        <div class="time-display">
+                            <span id="currentTime">00:00</span>
+                            <span>/</span>
+                            <span id="totalTime">00:00</span>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Sidebar Destra - Clip -->
+            <aside class="sidebar-right">
+                <div class="sidebar-section">
+                    <h2 class="section-title">CLIP</h2>
+                    <div class="clip-buttons">
+                        <button class="btn-secondary" id="btnClipStart">📍 Inizio</button>
+                        <button class="btn-secondary" id="btnClipEnd">🏁 Fine</button>
+                    </div>
+                    <div class="clips-container" id="clipsContainer">
+                        <!-- Clip cards generate dinamicamente -->
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- QWebChannel bridge -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script src="drawing.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

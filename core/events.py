@@ -224,6 +224,23 @@ class EventManager:
             None
         )
 
+    def get_event_at_timestamp(
+        self, timestamp_ms: int, tolerance_ms: int = 500
+    ) -> Optional[Event]:
+        """Ritorna l'evento al timestamp (o entro tolerance_ms per piccoli scarti di frame)."""
+        exact = next((e for e in self._events if e.timestamp_ms == timestamp_ms), None)
+        if exact:
+            return exact
+        if tolerance_ms <= 0:
+            return None
+        candidates = [
+            e for e in self._events
+            if abs(e.timestamp_ms - timestamp_ms) <= tolerance_ms
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda e: abs(e.timestamp_ms - timestamp_ms))
+
     def add_annotation_to_event(self, event_id: str, annotation_data: dict) -> bool:
         """Aggiunge un'annotazione a un evento esistente."""
         evt = next((e for e in self._events if e.id == event_id), None)

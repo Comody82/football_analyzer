@@ -15,7 +15,6 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QDialogButtonBox,
     QMessageBox,
-    QColorDialog,
     QScrollArea,
 )
 from PyQt5.QtCore import Qt
@@ -23,6 +22,11 @@ from PyQt5.QtGui import QColor
 
 from core.events import EventType
 from config import DEFAULT_EVENT_TYPES, get_event_buttons_config_path
+from ui.drawing_overlay import (
+    GradientTitleBar,
+    _RoundedDialogFilter,
+    pick_color_pes,
+)
 
 
 def load_saved_event_types():
@@ -96,7 +100,7 @@ class _EventTypeRow(QWidget):
         layout.addStretch()
 
     def _pick_color(self):
-        c = QColorDialog.getColor(QColor(self._color), self)
+        c = pick_color_pes(self, QColor(self._color))
         if c.isValid():
             self._color = c.name()
             self.color_btn.setStyleSheet(f"background-color: {self._color}; border: 1px solid #555;")
@@ -111,18 +115,40 @@ class _EventTypeRow(QWidget):
         )
 
 
+_EVENT_CONFIG_STYLE = """
+    QDialog { background: #0f1419; border-radius: 12px; border: 1px solid rgba(55, 65, 81, 0.8); }
+    QLabel { color: #e5e7eb; }
+    QPushButton { background: #1a2332; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 6px 12px; }
+    QPushButton:hover { background: rgba(18, 168, 138, 0.2); border-color: #12a88a; }
+    QPushButton#btnAccent { background: #12a88a; color: #0f1419; }
+    QLineEdit { background: #1a2332; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 6px; }
+    QCheckBox { color: #e5e7eb; }
+    QScrollArea { background: #0f1419; border: none; }
+"""
+
+
 class EventButtonsConfigDialog(QDialog):
     """Finestra di configurazione dei pulsanti evento."""
 
     def __init__(self, event_types: list, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setStyleSheet(_EVENT_CONFIG_STYLE)
         self.setWindowTitle("Configurazione pulsanti evento")
         self.setMinimumSize(480, 420)
         self._initial_types = [EventType(t.id, t.name, t.icon, t.color) for t in event_types]
         self._rows: list[_EventTypeRow] = []
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Modifica i nomi, aggiungi o elimina pulsanti evento:"))
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(GradientTitleBar("Configurazione pulsanti evento", self))
+
+        content = QWidget()
+        content.setStyleSheet("background: #0f1419;")
+        c_layout = QVBoxLayout(content)
+        c_layout.setContentsMargins(20, 16, 20, 20)
+        c_layout.addWidget(QLabel("Modifica i nomi, aggiungi o elimina pulsanti evento:"))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -131,27 +157,31 @@ class EventButtonsConfigDialog(QDialog):
         self.list_layout.setContentsMargins(0, 0, 0, 0)
         self.list_layout.setSpacing(2)
         scroll.setWidget(self.list_container)
-        layout.addWidget(scroll, 1)
+        c_layout.addWidget(scroll, 1)
 
         for et in self._initial_types:
             self._add_row(et)
 
         add_btn = QPushButton("➕ Aggiungi pulsante personalizzato")
-        add_btn.setProperty("accent", True)
+        add_btn.setObjectName("btnAccent")
         add_btn.clicked.connect(self._add_new_custom)
-        layout.addWidget(add_btn)
+        c_layout.addWidget(add_btn)
 
         self.save_as_default_cb = QCheckBox("Imposta come configurazione predefinita")
         self.save_as_default_cb.setToolTip(
             "Se attivo, i pulsanti vengono salvati. Alla riapertura del programma resteranno come configurati. "
             "Se non attivo, le modifiche valgono solo per questa sessione."
         )
-        layout.addWidget(self.save_as_default_cb)
+        c_layout.addWidget(self.save_as_default_cb)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
+        c_layout.addWidget(btns)
+
+        layout.addWidget(content)
+        self._round_filter = _RoundedDialogFilter()
+        self.installEventFilter(self._round_filter)
 
     def _add_row(self, event_type: EventType):
         row = _EventTypeRow(event_type, on_delete=self._on_delete_row)
