@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "project": {
+    "video_path": "C:\\Users\\comod\\Desktop\\Mac\\CALCIO\\Video da far vedere ai ragazzi\\Nuova cartella\\Scarico dell'attacante (Attaccante vicino ai centrocampisti).mp4",
+    "duration_ms": 0,
+    "drawings": [],
+    "playlist": []
+  },
+  "events": {
+    "event_types": [
+      {
+        "id": "evento",
+        "name": "Evento",
+        "icon": "•",
+        "color": "#9CA3AF"
+      },
+      {
+        "id": "annotazione",
+        "name": "Annotazione",
+        "icon": "•",
+        "color": "#00D9A5"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt_1",
+        "event_type_id": "evento",
+        "timestamp_ms": 1652,
+        "description": "",
+        "team": null,
+        "label": "Nuovo Evento",
+        "drawing_id": null,
+        "annotations": []
+      },
+      {
+        "id": "evt_2",
+        "event_type_id": "annotazione",
+        "timestamp_ms": 6652,
+        "description": "",
+        "team": null,
+        "label": "Annotazione 6s",
+        "drawing_id": null,
+        "annotations": [
+          {
+            "type": "curved_arrow",
+            "p1": {
+              "x": 311.0,
+              "y": 492.0
+            },
+            "ctrl": {
+              "x": 445.5,
+              "y": 436.5
+            },
+            "p2": {
+              "x": 580.0,
+              "y": 381.0
+            },
+            "pos": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "color": "#ffff00",
+            "pen_width": 8
+          }
+        ]
+      }
+    ],
+    "counter": 2
+  },
+  "clips": [
+    {
+      "id": "68d3b985-daf0-40a5-8ea3-61229bbd4d07",
+      "name": "Clip 1",
+      "start": 1652,
+      "end": 6652,
+      "duration": 5000,
+      "pause_duration_sec": 3
+    },
+    {
+      "id": "076f7894-5afe-4dea-b192-993b72644286",
+      "name": "Clip 2",
+      "start": 7786,
+      "end": 9167,
+      "duration": 1381,
+      "pause_duration_sec": 3
+    }
+  ]
+}

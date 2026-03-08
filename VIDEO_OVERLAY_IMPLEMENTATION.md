@@ -41,7 +41,6 @@ class VideoInteractionOverlay(QWidget):
     
     def __init__(self, video_player, parent=None):
         # Widget trasparente
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
 ```
 
@@ -181,7 +180,7 @@ def _on_mouse_released(self, x, y, timestamp):
 ## Caratteristiche Implementate
 
 ✅ **Overlay Trasparente**
-- `WA_TranslucentBackground` per trasparenza
+- widget con paint trasparente
 - `paintEvent()` vuoto (no rendering)
 - Non blocca rendering video
 
@@ -291,8 +290,8 @@ L'overlay trasparente è completamente funzionale e intercetta correttamente:
 
 ```python
 # Questa combinazione permette:
-self.setAttribute(Qt.WA_TranslucentBackground, True)  # Visivamente trasparente
-self.setAttribute(Qt.WA_TransparentForMouseEvents, False)  # Ma intercetta eventi
+self.setAttribute(Qt.WA_TransparentForMouseEvents, False)  # Intercetta eventi
+# Render trasparente gestito dal paintEvent
 ```
 
 ### Parent Widget

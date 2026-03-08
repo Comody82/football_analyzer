@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clip e Statistiche</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="sidebar-body sidebar-right">
+    <div class="sidebar-container">
+        <div class="sidebar-section">
+            <div class="clips-section">
+                <div class="clips-header">
+                    <h2>CREA CLIP</h2>
+                    <div class="clips-create-actions">
+                        <button class="btn-control" id="btnClipStart">Inizio</button>
+                        <button class="btn-control" id="btnClipEnd">Fine</button>
+                    </div>
+                </div>
+
+                <button class="export-btn" id="btnExport">
+                    <span class="icon">⤴</span>
+                    Genera Highlights
+                </button>
+
+                <div class="clips-list clips-container" id="clipsContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

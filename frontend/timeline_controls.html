@@ -7,23 +7,7 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="center-body">
-    <div class="app-shell">
-        <div class="topbar" id="appTopbar">
-            <div class="topbar-left">
-                <button class="topbar-btn" id="btnBackProjects">← Progetti</button>
-                <div class="topbar-title">Roma vs Milan - Analisi</div>
-            </div>
-            <div class="topbar-right">
-                <button class="topbar-btn topbar-action" id="btnSaveProject">Salva</button>
-                <button class="topbar-btn topbar-action" id="btnExportProject">Esporta</button>
-                <button class="topbar-btn win-btn" id="btnWinMin">—</button>
-                <button class="topbar-btn win-btn" id="btnWinMax">□</button>
-                <button class="topbar-btn win-btn close" id="btnWinClose">✕</button>
-            </div>
-        </div>
-        <div class="main-layout">
     <div class="controls-container">
-        <!-- Progress bar (slider) -->
         <div class="progress-section">
             <div class="timeline-track" id="mainTimelineTrack">
                 <div class="timeline-progress" id="timelineProgress"></div>
@@ -31,13 +15,11 @@
             </div>
         </div>
 
-        <!-- Playback Controls Row -->
         <div class="ctrl-row">
             <button class="btn-control" id="btnRestart" title="Restart">↺ Restart</button>
             <button class="btn-control" id="btnSpeed" title="Velocità">1x</button>
             <button class="btn-control" id="btnFrame" title="Frame">▶|</button>
             <button class="btn-control btn-play" id="btnPlay">▶ Play</button>
-            <button class="btn-control" id="btnPause">⏸ Pausa</button>
             <button class="btn-control" id="btnRewind" title="Indietro Ns (click destro per intervallo)">-5s</button>
             <button class="btn-control" id="btnForward" title="Avanti Ns (click destro per intervallo)">+5s</button>
             <button class="btn-control" id="btnPrevEvent" title="Evento precedente">⏮</button>
@@ -48,15 +30,8 @@
                 <span id="totalTime">00:00</span>
             </div>
             <button class="btn-control" id="btnShortcuts" title="Scorciatoie da tastiera (F1)">⌨ ?</button>
-            <div class="ctrl-separator"></div>
-            <div class="clip-quick-group">
-                <span class="clip-quick-label">Crea Clip</span>
-                <button class="btn-control" id="btnClipStart">Inizio</button>
-                <button class="btn-control" id="btnClipEnd">Fine</button>
-            </div>
         </div>
 
-        <!-- Timeline eventi -->
         <div class="timeline-events-section">
             <label class="timeline-label">Timeline eventi:</label>
             <div class="timeline-canvas-wrapper">
@@ -64,7 +39,6 @@
             </div>
         </div>
 
-        <!-- Strumenti disegno -->
         <div class="draw-tools-section">
             <label class="draw-tools-label">Strumenti disegno</label>
             <div class="draw-tools-row">
@@ -82,10 +56,7 @@
             </div>
         </div>
     </div>
-        </div>
-    </div>
 
-    <!-- QWebChannel bridge -->
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
     <script src="script.js"></script>
 </body>

@@ -1,0 +1,22 @@
+{
+  "projects": [
+    {
+      "id": "0e2ef358-5ccb-4502-b633-13e8a438ad3c",
+      "name": "Test",
+      "createdAt": "2026-03-06T19:38:10Z",
+      "updatedAt": "2026-03-07T20:26:49Z"
+    },
+    {
+      "id": "57e065dd-7b55-402c-a585-584e8a64e084",
+      "name": "Test2",
+      "createdAt": "2026-03-06T20:06:47Z",
+      "updatedAt": "2026-03-07T18:26:04Z"
+    },
+    {
+      "id": "0a049d32-bde9-437b-9c21-1032eb5df37e",
+      "name": "Test 3",
+      "createdAt": "2026-03-07T11:47:58Z",
+      "updatedAt": "2026-03-07T16:47:45Z"
+    }
+  ]
+}

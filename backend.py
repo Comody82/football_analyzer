@@ -4,9 +4,14 @@ Gestisce la comunicazione bidirezionale tra Python e JavaScript via QWebChannel
 """
 import json
 import logging
+import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
-from PyQt5.QtCore import QObject, Qt, pyqtSignal, pyqtSlot
-from PyQt5.QtWidgets import QFileDialog, QApplication, QDialog
+from datetime import datetime
+from PyQt5.QtCore import QObject, Qt, pyqtSignal, pyqtSlot, QTimer, QThread
+from PyQt5.QtWidgets import QFileDialog, QApplication, QDialog, QMessageBox, QInputDialog
 
 from core import EventManager, ClipManager, Project, StatisticsManager
 from core.events import EventType
@@ -20,6 +25,7 @@ class BackendBridge(QObject):
     # Segnali per aggiornare la UI
     clipsUpdated = pyqtSignal(str)  # JSON delle clip
     statusChanged = pyqtSignal(str)
+    playbackStateChanged = pyqtSignal(bool)  # True=playing, False=paused/stopped
     videoLoaded = pyqtSignal(str)  # path video
     eventsUpdated = pyqtSignal(str)  # JSON degli eventi (per timeline)
     eventCreated = pyqtSignal(str)   # id evento appena creato (per selezione card)
@@ -39,6 +45,12 @@ class BackendBridge(QObject):
         self.active_clip_id = None
         self.editing_clip_id = None
         self._editing_clip_backup = None
+        self._clip_resume_token = 0
+        self._clip_last_position_ms = 0
+        self._clip_triggered_event_ids = set()
+        self.current_project_id = None
+        self._download_thread = None
+        self._download_worker = None
         
         # Carica tipi evento di default
         self.event_manager.load_default_types(DEFAULT_EVENT_TYPES)
@@ -47,6 +59,7 @@ class BackendBridge(QObject):
         if self.video_player:
             self.video_player.positionChanged.connect(self._emit_time_update)
             self.video_player.durationChanged.connect(self._emit_time_update)
+            self.video_player.playbackStateChanged.connect(self.playbackStateChanged.emit)
     
     # ==========================================
     # Slots Python chiamati da JavaScript
@@ -56,14 +69,19 @@ class BackendBridge(QObject):
     def getClips(self):
         """Restituisce le clip in formato JSON"""
         clips_data = []
+        is_player_playing = bool(self.video_player and self.video_player.state() == 1)
         for clip in self.clips:
+            pause_duration_sec = int(clip.get('pause_duration_sec', 3))
+            is_active = clip['id'] == self.active_clip_id
             clips_data.append({
                 'id': clip['id'],
                 'name': clip['name'],
                 'duration': clip['duration'],
                 'start': clip['start'],
                 'end': clip['end'],
-                'isPlaying': clip['id'] == self.active_clip_id,
+                'pause_duration_sec': max(0, pause_duration_sec),
+                'isActive': is_active,
+                'isPlaying': is_active and is_player_playing,
                 'isEditing': clip['id'] == self.editing_clip_id
             })
         return json.dumps(clips_data)
@@ -83,18 +101,102 @@ class BackendBridge(QObject):
     
     @pyqtSlot(str)
     def playClip(self, clip_id):
-        """Riproduce una clip"""
+        """Riproduce una clip. Pausa, seek, render disegni, poi play."""
         logging.debug(f"Playing clip: {clip_id}")
         clip = self._get_clip_by_id(clip_id)
         if clip and self.video_player:
             self.active_clip_id = clip_id
+            self._clip_cancel_pending_resume()
+            # Include il boundary di start (evento esatto a clip.start).
+            self._clip_last_position_ms = max(0, clip['start'] - 1)
+            self._clip_triggered_event_ids.clear()
+            self.video_player.pause()
             self.video_player.setPosition(clip['start'])
-            self.video_player.play()
-            self._notify_clips_updated()
+            if self.parent_window and hasattr(self.parent_window, 'force_render_drawings_at'):
+                self.parent_window.force_render_drawings_at(clip['start'])
+            def _after_seek():
+                if clip_id != self.active_clip_id:
+                    return
+                if self.parent_window and hasattr(self.parent_window, 'force_render_drawings_at'):
+                    self.parent_window.force_render_drawings_at(clip['start'])
+                # Se c'è evento al boundary iniziale, applica subito la pausa clip temporizzata.
+                reached = self._find_reached_clip_event(
+                    clip,
+                    max(0, clip['start'] - 1),
+                    clip['start'],
+                    tolerance_ms=50
+                )
+                if reached and reached.id not in self._clip_triggered_event_ids:
+                    self._clip_triggered_event_ids.add(reached.id)
+                    pause_duration_sec = max(0, int(clip.get('pause_duration_sec', 3)))
+                    if pause_duration_sec > 0:
+                        self._clip_schedule_resume(pause_duration_sec)
+                        self._notify_clips_updated()
+                        return
+                self.video_player.play()
+                self._notify_clips_updated()
+            QTimer.singleShot(80, _after_seek)
         self.statusChanged.emit(f"Playing: {clip['name'] if clip else 'Unknown'}")
+
+    @pyqtSlot(str)
+    def pauseClip(self, clip_id):
+        """Pausa solo la clip attiva (non influisce sulla modalità normale)."""
+        if not self.video_player or self.active_clip_id != clip_id:
+            return
+        self._clip_cancel_pending_resume()
+        self.video_player.pause()
+        self._notify_clips_updated()
+        clip = self._get_clip_by_id(clip_id)
+        self.statusChanged.emit(f"Clip in pausa: {clip['name'] if clip else clip_id}")
+
+    @pyqtSlot(str)
+    def toggleClipPlayback(self, clip_id):
+        """Toggle play/pause della clip: start, pausa manuale, resume dalla posizione corrente."""
+        if not self.video_player:
+            return
+        if self.active_clip_id != clip_id:
+            # Start clip mode solo da click clip-card toggle.
+            self.playClip(clip_id)
+            return
+        if self.video_player.state() == 1:
+            # Pausa manuale in clip mode: non uscire dalla modalità clip.
+            self.pauseClip(clip_id)
+            return
+        # Resume clip mode dalla posizione corrente (senza reset stato trigger).
+        self._clip_cancel_pending_resume()
+        clip = self._get_clip_by_id(clip_id)
+        if not clip:
+            return
+        if self.video_player.position() >= clip['end']:
+            self.video_player.setPosition(clip['start'])
+            self._clip_last_position_ms = max(0, clip['start'] - 1)
+            self._clip_triggered_event_ids.clear()
+            if self.parent_window and hasattr(self.parent_window, 'force_render_drawings_at'):
+                self.parent_window.force_render_drawings_at(clip['start'])
+        self.video_player.play()
+        self._notify_clips_updated()
+
+    @pyqtSlot(str)
+    def restartClip(self, clip_id):
+        """Riporta la clip all'inizio e mette in pausa, mantenendo clip mode attiva."""
+        if not self.video_player:
+            return
+        clip = self._get_clip_by_id(clip_id)
+        if not clip:
+            return
+        self.active_clip_id = clip_id
+        self._clip_cancel_pending_resume()
+        self._clip_triggered_event_ids.clear()
+        self._clip_last_position_ms = max(0, clip['start'] - 1)
+        self.video_player.pause()
+        self.video_player.setPosition(clip['start'])
+        if self.parent_window and hasattr(self.parent_window, 'force_render_drawings_at'):
+            self.parent_window.force_render_drawings_at(clip['start'])
+        self._notify_clips_updated()
+        self.statusChanged.emit(f"Clip pronta dall'inizio: {clip['name']}")
     
     @pyqtSlot(str)
-    def editClip(self, clip_id):
+    def editClip(self, clip_id: str):
         """Entra in modalità modifica clip"""
         logging.debug(f"Editing clip: {clip_id}")
         clip = self._get_clip_by_id(clip_id)
@@ -103,7 +205,8 @@ class BackendBridge(QObject):
             self._editing_clip_backup = {
                 'start': clip['start'],
                 'end': clip['end'],
-                'duration': clip['duration']
+                'duration': clip['duration'],
+                'pause_duration_sec': int(clip.get('pause_duration_sec', 3))
             }
             self.editing_clip_id = clip_id
             if self.video_player:
@@ -119,6 +222,8 @@ class BackendBridge(QObject):
         self.clips = [c for c in self.clips if c['id'] != clip_id]
         if self.active_clip_id == clip_id:
             self.active_clip_id = None
+            self._clip_cancel_pending_resume()
+            self._clip_triggered_event_ids.clear()
         if self.editing_clip_id == clip_id:
             self.editing_clip_id = None
         self._notify_clips_updated()
@@ -196,6 +301,8 @@ class BackendBridge(QObject):
     def videoPlay(self):
         """Play video"""
         if self.video_player:
+            self.exit_clip_playback_mode()
+            self._clip_cancel_pending_resume()
             self.video_player.play()
             self.statusChanged.emit("Playing")
     
@@ -203,6 +310,7 @@ class BackendBridge(QObject):
     def videoPause(self):
         """Pause video"""
         if self.video_player:
+            self._clip_cancel_pending_resume()
             self.video_player.pause()
             self.statusChanged.emit("Paused")
 
@@ -213,9 +321,12 @@ class BackendBridge(QObject):
             st = self.video_player.state()
             # PlayingState = 1, PausedState/StoppedState = 0 o 2
             if st == 1:
+                self._clip_cancel_pending_resume()
                 self.video_player.pause()
                 self.statusChanged.emit("Paused")
             else:
+                self.exit_clip_playback_mode()
+                self._clip_cancel_pending_resume()
                 self.video_player.play()
                 self.statusChanged.emit("Playing")
 
@@ -223,6 +334,8 @@ class BackendBridge(QObject):
     def videoRewind(self, seconds):
         """Rewind video di N secondi"""
         if self.video_player:
+            self.exit_clip_playback_mode()
+            self._clip_cancel_pending_resume()
             pos = max(0, self.video_player.position() - seconds * 1000)
             self.video_player.setPosition(pos)
     
@@ -230,6 +343,8 @@ class BackendBridge(QObject):
     def videoForward(self, seconds):
         """Forward video di N secondi"""
         if self.video_player:
+            self.exit_clip_playback_mode()
+            self._clip_cancel_pending_resume()
             pos = min(self.video_player.duration(), 
                      self.video_player.position() + seconds * 1000)
             self.video_player.setPosition(pos)
@@ -238,6 +353,8 @@ class BackendBridge(QObject):
     def restartVideo(self):
         """Restart video dall'inizio e play"""
         if self.video_player:
+            self.exit_clip_playback_mode()
+            self._clip_cancel_pending_resume()
             self.video_player.setPosition(0)
             self.video_player.play()
             self.statusChanged.emit("Restarted")
@@ -261,18 +378,103 @@ class BackendBridge(QObject):
     
     @pyqtSlot()
     def openVideo(self):
-        """Apre dialog per selezionare video"""
+        """Apre sorgente video: file locale oppure link web."""
+        parent = self.parent_window or QApplication.activeWindow()
+        box = QMessageBox(parent)
+        box.setWindowTitle("Apri Video")
+        box.setText("Scegli la sorgente del video")
+        btn_file = box.addButton("File locale", QMessageBox.AcceptRole)
+        btn_link = box.addButton("Link web", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec_()
+
+        clicked = box.clickedButton()
+        if clicked == btn_file:
+            self._open_video_from_file_dialog()
+        elif clicked == btn_link:
+            self._open_video_from_link_dialog()
+
+    def _open_video_from_file_dialog(self):
         file_path, _ = QFileDialog.getOpenFileName(
             None,
             "Apri Video",
             "",
-            "Video Files (*.mp4 *.avi *.mkv *.mov);;All Files (*.*)"
+            "Video Files (*.mp4 *.avi *.mkv *.mov *.webm);;All Files (*.*)"
         )
+        if file_path:
+            self._load_video_path(file_path)
+
+    def _open_video_from_link_dialog(self):
+        parent = self.parent_window or QApplication.activeWindow()
+        url, ok = QInputDialog.getText(
+            parent,
+            "Apri da link",
+            "Incolla URL video (YouTube/Facebook supportato se estrattore disponibile):"
+        )
+        if not ok:
+            return
+        url = (url or "").strip()
+        if not url:
+            return
+        if not re.match(r"^https?://", url, flags=re.IGNORECASE):
+            QMessageBox.warning(parent, "URL non valido", "Inserisci un link http/https valido.")
+            return
+        self._start_video_download(url)
+
+    def _load_video_path(self, file_path: str):
         if file_path and self.video_player:
             self.video_player.load(file_path)
             self.project.video_path = file_path
             self.videoLoaded.emit(file_path)
             self.statusChanged.emit(f"Video caricato: {Path(file_path).name}")
+
+    def _start_video_download(self, url: str):
+        parent = self.parent_window or QApplication.activeWindow()
+        if shutil.which("yt-dlp") is None:
+            QMessageBox.warning(
+                parent,
+                "Dipendenza mancante",
+                "yt-dlp non trovato. Installa yt-dlp per usare i link web."
+            )
+            return
+        if self._download_thread is not None:
+            QMessageBox.information(parent, "Download in corso", "Attendi la fine del download corrente.")
+            return
+
+        downloads_dir = (Path(__file__).parent / "data" / "downloads").absolute()
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+
+        self._download_thread = QThread(self)
+        self._download_worker = _VideoDownloadWorker(url, str(downloads_dir))
+        self._download_worker.moveToThread(self._download_thread)
+        self._download_thread.started.connect(self._download_worker.run)
+        self._download_worker.status.connect(self.statusChanged.emit)
+        self._download_worker.failed.connect(self._on_video_download_failed)
+        self._download_worker.finished.connect(self._on_video_download_finished)
+        self._download_worker.finished.connect(self._download_thread.quit)
+        self._download_worker.failed.connect(self._download_thread.quit)
+        self._download_thread.finished.connect(self._cleanup_download_worker)
+        self._download_thread.start()
+        self.statusChanged.emit("Download video avviato...")
+
+    @pyqtSlot(str)
+    def _on_video_download_finished(self, file_path: str):
+        self._load_video_path(file_path)
+
+    @pyqtSlot(str)
+    def _on_video_download_failed(self, message: str):
+        parent = self.parent_window or QApplication.activeWindow()
+        QMessageBox.warning(parent, "Download fallito", message)
+        self.statusChanged.emit("Download video fallito")
+
+    @pyqtSlot()
+    def _cleanup_download_worker(self):
+        if self._download_worker is not None:
+            self._download_worker.deleteLater()
+            self._download_worker = None
+        if self._download_thread is not None:
+            self._download_thread.deleteLater()
+            self._download_thread = None
     
     @pyqtSlot()
     def clipStart(self):
@@ -297,7 +499,8 @@ class BackendBridge(QObject):
                     'name': f"Clip {len(self.clips) + 1}",
                     'start': start,
                     'end': end,
-                    'duration': end - start
+                    'duration': end - start,
+                    'pause_duration_sec': 3
                 }
                 self.clips.append(clip)
                 logging.debug(f"Clip created: {clip['name']}, duration: {clip['duration']}ms")
@@ -335,9 +538,12 @@ class BackendBridge(QObject):
             self.statusChanged.emit("Fine aggiornata")
     
     @pyqtSlot(str)
-    def saveClipEdit(self, clip_id):
+    @pyqtSlot(str, int)
+    def saveClipEdit(self, clip_id, pause_duration_sec=3):
         """Salva modifiche clip ed esce da editing"""
-        if self.editing_clip_id == clip_id:
+        clip = self._get_clip_by_id(clip_id)
+        if self.editing_clip_id == clip_id and clip:
+            clip['pause_duration_sec'] = max(0, int(pause_duration_sec))
             self.editing_clip_id = None
             self._editing_clip_backup = None
             self._notify_clips_updated()
@@ -351,6 +557,7 @@ class BackendBridge(QObject):
             clip['start'] = self._editing_clip_backup['start']
             clip['end'] = self._editing_clip_backup['end']
             clip['duration'] = self._editing_clip_backup['duration']
+            clip['pause_duration_sec'] = self._editing_clip_backup['pause_duration_sec']
         self.editing_clip_id = None
         self._editing_clip_backup = None
         self._notify_clips_updated()
@@ -360,6 +567,7 @@ class BackendBridge(QObject):
     def seekPercent(self, percent):
         """Seek video alla percentuale specificata"""
         if self.video_player:
+            self.exit_clip_playback_mode()
             pos = int(self.video_player.duration() * percent)
             self.video_player.setPosition(pos)
     
@@ -372,6 +580,11 @@ class BackendBridge(QObject):
                 'duration': self.video_player.duration()
             })
         return json.dumps({'current': 0, 'duration': 0})
+
+    @pyqtSlot(result=bool)
+    def isVideoPlaying(self):
+        """Ritorna True se il player è in riproduzione."""
+        return bool(self.video_player and self.video_player.state() == 1)
     
     @pyqtSlot(result=str)
     def getEvents(self):
@@ -389,10 +602,17 @@ class BackendBridge(QObject):
     
     @pyqtSlot(int)
     def seekToTimestamp(self, timestamp_ms):
-        """Seek video al timestamp specificato. Mette in pausa per mostrare eventuali disegni."""
+        """Seek video al timestamp specificato. Mette in pausa, seek, forza render disegni."""
         if self.video_player:
+            self.exit_clip_playback_mode()
+            self._clip_cancel_pending_resume()
+            if self.parent_window and hasattr(self.parent_window, 'force_render_drawings_at'):
+                self.parent_window._seek_target_ms = timestamp_ms
             self.video_player.pause()
             self.video_player.setPosition(timestamp_ms)
+            if self.parent_window and hasattr(self.parent_window, 'force_render_drawings_at'):
+                self.parent_window.force_render_drawings_at(timestamp_ms)
+                self.parent_window._seek_target_ms = None
             self.statusChanged.emit(f"Seek to {timestamp_ms}ms")
     
     @pyqtSlot()
@@ -400,6 +620,7 @@ class BackendBridge(QObject):
         """Vai all'evento precedente"""
         if not self.video_player:
             return
+        self.exit_clip_playback_mode()
         pos = self.video_player.position()
         events = [e for e in self.event_manager.get_events() if e.timestamp_ms < pos]
         if not events:
@@ -413,6 +634,7 @@ class BackendBridge(QObject):
         """Vai all'evento successivo"""
         if not self.video_player:
             return
+        self.exit_clip_playback_mode()
         pos = self.video_player.position()
         events = [e for e in self.event_manager.get_events() if e.timestamp_ms > pos]
         if not events:
@@ -426,6 +648,7 @@ class BackendBridge(QObject):
         """Vai all'evento precedente"""
         if not self.video_player:
             return
+        self.exit_clip_playback_mode()
         pos = self.video_player.position()
         events = [e for e in self.event_manager.get_events() if e.timestamp_ms < pos]
         if not events:
@@ -439,6 +662,7 @@ class BackendBridge(QObject):
         """Vai all'evento successivo"""
         if not self.video_player:
             return
+        self.exit_clip_playback_mode()
         pos = self.video_player.position()
         events = [e for e in self.event_manager.get_events() if e.timestamp_ms > pos]
         if not events:
@@ -474,6 +698,7 @@ class BackendBridge(QObject):
             "circle": DrawTool.CIRCLE, "arrow": DrawTool.ARROW, "line": DrawTool.LINE,
             "curved_arrow": DrawTool.CURVED_ARROW, "parabola_arrow": DrawTool.PARABOLA_ARROW,
             "rect": DrawTool.RECTANGLE, "rectangle": DrawTool.RECTANGLE,
+            "polygon": DrawTool.POLYGON,
             "text": DrawTool.TEXT, "pencil": DrawTool.PENCIL, "none": DrawTool.NONE,
         }
         tool = name_map.get((tool_name or "").lower(), DrawTool.NONE)
@@ -493,6 +718,66 @@ class BackendBridge(QObject):
         """Mostra dialog scorciatoie da tastiera (chiamabile da Web UI)."""
         if self.parent_window and hasattr(self.parent_window, '_show_shortcuts_help'):
             self.parent_window._show_shortcuts_help()
+
+    @pyqtSlot()
+    def backToProjects(self):
+        """Ritorna alla dashboard progetti."""
+        if self.parent_window and hasattr(self.parent_window, "_go_back_to_dashboard"):
+            self.parent_window._go_back_to_dashboard()
+
+    @pyqtSlot(str)
+    def frontendReady(self, area):
+        """Notifica che una sezione web (left/center/right) ha completato il bootstrap."""
+        area_name = (area or "").strip().lower()
+        if self.parent_window and hasattr(self.parent_window, "_on_frontend_ready"):
+            self.parent_window._on_frontend_ready(area_name)
+
+    @pyqtSlot()
+    def openHighlightsStudio(self):
+        """Apre lo studio highlights nel workspace."""
+        if self.parent_window and hasattr(self.parent_window, "show_highlights_studio"):
+            self.parent_window.show_highlights_studio()
+
+    @pyqtSlot()
+    def windowMinimize(self):
+        """Minimizza finestra principale."""
+        if self.parent_window:
+            self.parent_window.window().showMinimized()
+
+    @pyqtSlot()
+    def windowToggleMaximize(self):
+        """Toggle maximize/normal finestra principale."""
+        if not self.parent_window:
+            return
+        win = self.parent_window.window()
+        if win.isMaximized():
+            win.showNormal()
+        else:
+            win.showMaximized()
+
+    @pyqtSlot()
+    def windowClose(self):
+        """Chiude finestra principale."""
+        if self.parent_window:
+            self.parent_window.window().close()
+
+    @pyqtSlot(int, int)
+    def startWindowDrag(self, global_x, global_y):
+        """Inizia drag finestra dalla topbar HTML."""
+        if self.parent_window and hasattr(self.parent_window, "_start_window_drag"):
+            self.parent_window._start_window_drag(global_x, global_y)
+
+    @pyqtSlot(int, int)
+    def moveWindowDrag(self, global_x, global_y):
+        """Continua drag finestra."""
+        if self.parent_window and hasattr(self.parent_window, "_move_window_drag"):
+            self.parent_window._move_window_drag(global_x, global_y)
+
+    @pyqtSlot()
+    def endWindowDrag(self):
+        """Termina drag finestra."""
+        if self.parent_window and hasattr(self.parent_window, "_end_window_drag"):
+            self.parent_window._end_window_drag()
 
     @pyqtSlot(result=int)
     def getVideoPosition(self):
@@ -529,11 +814,14 @@ class BackendBridge(QObject):
         """Trova clip per ID"""
         for clip in self.clips:
             if clip['id'] == clip_id:
+                self._normalize_clip(clip)
                 return clip
         return None
     
     def _notify_clips_updated(self):
         """Notifica JavaScript che le clip sono cambiate"""
+        for clip in self.clips:
+            self._normalize_clip(clip)
         clips_json = self.getClips()
         self.clipsUpdated.emit(clips_json)
     
@@ -542,19 +830,386 @@ class BackendBridge(QObject):
         if self.active_clip_id and self.video_player:
             clip = self._get_clip_by_id(self.active_clip_id)
             pos = self.video_player.position()
+            previous = self._clip_last_position_ms
             if clip and pos >= clip['end']:
+                self._clip_cancel_pending_resume()
                 self.video_player.pause()
                 self.active_clip_id = None
+                self._clip_triggered_event_ids.clear()
                 self._notify_clips_updated()
+            elif clip and self.video_player.state() == 1:
+                self._check_clip_event_pause(clip, previous, pos)
+            self._clip_last_position_ms = pos
         self.timeUpdated.emit(self.getCurrentTime())
+
+    def _check_clip_event_pause(self, clip, previous_ms, current_ms):
+        """Pausa temporizzata solo durante la riproduzione clip."""
+        if previous_ms < 0:
+            return
+        if abs(current_ms - previous_ms) > 500:
+            return
+        events = sorted(self.event_manager.get_events(), key=lambda e: e.timestamp_ms)
+        for evt in events:
+            if current_ms < evt.timestamp_ms - 200:
+                self._clip_triggered_event_ids.discard(evt.id)
+        reached = self._find_reached_clip_event(clip, previous_ms, current_ms, tolerance_ms=50)
+        if not reached:
+            return
+        self._clip_triggered_event_ids.add(reached.id)
+        pause_duration_sec = max(0, int(clip.get('pause_duration_sec', 3)))
+        if pause_duration_sec <= 0:
+            return
+        self.video_player.pause()
+        self._clip_schedule_resume(pause_duration_sec)
+
+    def _find_reached_clip_event(self, clip, previous_ms, current_ms, tolerance_ms=50):
+        """Trova il primo evento raggiunto nel range clip con tolleranza temporale."""
+        lower = min(previous_ms, current_ms) - tolerance_ms
+        upper = max(previous_ms, current_ms) + tolerance_ms
+        for evt in sorted(self.event_manager.get_events(), key=lambda e: e.timestamp_ms):
+            if evt.id in self._clip_triggered_event_ids:
+                continue
+            # Boundary inclusivo: evento a clip.start è valido.
+            if not (evt.timestamp_ms >= clip['start'] and evt.timestamp_ms <= clip['end']):
+                continue
+            if lower <= evt.timestamp_ms <= upper:
+                return evt
+        return None
+
+    def _clip_schedule_resume(self, pause_duration_sec):
+        """Programma ripresa clip con token cancellabile."""
+        self._clip_resume_token += 1
+        resume_token = self._clip_resume_token
+
+        def resume_playback():
+            if resume_token != self._clip_resume_token:
+                return
+            if not self.video_player or not self.active_clip_id:
+                return
+            clip = self._get_clip_by_id(self.active_clip_id)
+            if not clip:
+                return
+            if self.video_player.position() >= clip['end']:
+                return
+            self.video_player.play()
+
+        QTimer.singleShot(int(pause_duration_sec * 1000), resume_playback)
+
+    def _clip_cancel_pending_resume(self):
+        """Cancella eventuale resume clip pendente (invalidando il token)."""
+        self._clip_resume_token += 1
+
+    def exit_clip_playback_mode(self):
+        """Esce dalla modalità clip playback: reset stato + timer + selezione card."""
+        was_active = self.active_clip_id is not None
+        self.active_clip_id = None
+        self._clip_cancel_pending_resume()
+        self._clip_triggered_event_ids.clear()
+        if was_active:
+            self._notify_clips_updated()
+
+    def _normalize_clip(self, clip):
+        """Applica default/validazione ai campi clip."""
+        clip['pause_duration_sec'] = max(0, int(clip.get('pause_duration_sec', 3)))
+
+    def _run_ffmpeg(self, cmd):
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            )
+            if proc.returncode != 0:
+                logging.warning("FFmpeg error: %s", (proc.stderr or proc.stdout or "").strip())
+                return False
+            return True
+        except Exception as ex:
+            logging.warning("Errore esecuzione ffmpeg: %s", ex)
+            return False
+
+    def _render_clip_segment(self, source_video: str, start_ms: int, end_ms: int, out_path: Path) -> bool:
+        start_sec = max(0.0, float(start_ms) / 1000.0)
+        duration_sec = max(0.1, (float(end_ms) - float(start_ms)) / 1000.0)
+        vf = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start_sec:.3f}",
+            "-i", str(source_video),
+            "-t", f"{duration_sec:.3f}",
+            "-vf", vf,
+            "-r", "25",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "22",
+            "-c:a", "aac",
+            "-ar", "44100",
+            "-ac", "2",
+            "-movflags", "+faststart",
+            str(out_path),
+        ]
+        return self._run_ffmpeg(cmd)
+
+    def _render_image_segment(self, image_path: str, duration_sec: int, out_path: Path) -> bool:
+        dur = max(1, int(duration_sec))
+        vf = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1",
+            "-t", str(dur),
+            "-i", str(image_path),
+            "-f", "lavfi",
+            "-t", str(dur),
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-shortest",
+            "-vf", vf,
+            "-r", "25",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "22",
+            "-c:a", "aac",
+            "-ar", "44100",
+            "-ac", "2",
+            "-movflags", "+faststart",
+            str(out_path),
+        ]
+        return self._run_ffmpeg(cmd)
+
+    def generate_highlights_package(self, selected_clip_ids, image_items):
+        """
+        Genera highlights finale da clip selezionate + immagini opzionali.
+        image_items: [{"path": "...", "duration_sec": 3}, ...]
+        Ritorna tuple (ok: bool, result: str) dove result e' path output o messaggio errore.
+        """
+        if not self.clip_manager.is_available():
+            return False, "FFmpeg non trovato. Installa FFmpeg per generare highlights."
+
+        source_video = str(getattr(self.project, "video_path", "") or "").strip()
+        if not source_video or not Path(source_video).exists():
+            return False, "Video sorgente non disponibile."
+
+        selected_clip_ids = list(selected_clip_ids or [])
+        selected_set = set(selected_clip_ids)
+        ordered_clips = [c for c in self.clips if c.get("id") in selected_set]
+
+        image_items = list(image_items or [])
+        valid_images = []
+        for it in image_items:
+            p = str((it or {}).get("path", "")).strip()
+            d = int((it or {}).get("duration_sec", 3) or 3)
+            if p and Path(p).exists():
+                valid_images.append({"path": p, "duration_sec": max(1, d)})
+
+        if not ordered_clips and not valid_images:
+            return False, "Nessun contenuto selezionato per gli highlights."
+
+        highlights_dir = Path(HIGHLIGHTS_FOLDER)
+        highlights_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir = Path(tempfile.mkdtemp(prefix="hl_", dir=str(highlights_dir)))
+
+        try:
+            segment_paths = []
+            seg_idx = 0
+
+            for clip in ordered_clips:
+                out_seg = tmp_dir / f"seg_clip_{seg_idx:03d}.mp4"
+                seg_idx += 1
+                if not self._render_clip_segment(source_video, int(clip["start"]), int(clip["end"]), out_seg):
+                    return False, "Errore durante rendering clip highlights."
+                segment_paths.append(out_seg)
+
+            for img in valid_images:
+                out_seg = tmp_dir / f"seg_img_{seg_idx:03d}.mp4"
+                seg_idx += 1
+                if not self._render_image_segment(img["path"], img["duration_sec"], out_seg):
+                    return False, "Errore durante rendering immagini highlights."
+                segment_paths.append(out_seg)
+
+            if not segment_paths:
+                return False, "Nessun segmento generato."
+
+            list_file = tmp_dir / "segments.txt"
+            with open(list_file, "w", encoding="utf-8") as f:
+                for seg in segment_paths:
+                    seg_posix = str(seg.absolute()).replace("\\", "/")
+                    f.write(f"file '{seg_posix}'\n")
+
+            output_name = f"highlights_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+            output_path = highlights_dir / output_name
+            cmd_concat = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(list_file),
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "22",
+                "-c:a", "aac",
+                "-ar", "44100",
+                "-ac", "2",
+                "-movflags", "+faststart",
+                str(output_path),
+            ]
+            if not self._run_ffmpeg(cmd_concat):
+                return False, "Errore assemblaggio highlights finale."
+
+            if not output_path.exists():
+                return False, "File highlights non creato."
+            return True, str(output_path.absolute())
+        finally:
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
     
     def add_test_clips(self):
         """Aggiunge clip di test per demo"""
         import uuid
         test_clips = [
-            {'id': str(uuid.uuid4()), 'name': 'Gol al 15°', 'start': 900000, 'end': 903000, 'duration': 3000},
-            {'id': str(uuid.uuid4()), 'name': 'Azione 1° tempo', 'start': 1200000, 'end': 1207000, 'duration': 7000},
-            {'id': str(uuid.uuid4()), 'name': 'Corner', 'start': 1500000, 'end': 1505000, 'duration': 5000},
+            {'id': str(uuid.uuid4()), 'name': 'Gol al 15°', 'start': 900000, 'end': 903000, 'duration': 3000, 'pause_duration_sec': 3},
+            {'id': str(uuid.uuid4()), 'name': 'Azione 1° tempo', 'start': 1200000, 'end': 1207000, 'duration': 7000, 'pause_duration_sec': 3},
+            {'id': str(uuid.uuid4()), 'name': 'Corner', 'start': 1500000, 'end': 1505000, 'duration': 5000, 'pause_duration_sec': 3},
         ]
         self.clips.extend(test_clips)
         self._notify_clips_updated()
+
+    # ==========================================
+    # Persistenza progetto (routing dashboard/workspace)
+    # ==========================================
+
+    def export_workspace_state(self) -> dict:
+        """Esporta stato workspace in forma serializzabile."""
+        return {
+            "version": 1,
+            "project": self.project.to_dict(),
+            "events": self.event_manager.to_dict(),
+            "clips": list(self.clips),
+        }
+
+    def import_workspace_state(self, data: dict):
+        """Importa stato workspace senza alterare logiche runtime."""
+        payload = data or {}
+        self.project.from_dict(payload.get("project", {}))
+        events_data = payload.get("events")
+        if events_data:
+            self.event_manager.from_dict(events_data)
+        else:
+            # Mantiene i tipi default se il file è vuoto/legacy.
+            self.event_manager.clear_events()
+        self.clips = list(payload.get("clips", []))
+        for clip in self.clips:
+            self._normalize_clip(clip)
+        self.active_clip_id = None
+        self.editing_clip_id = None
+        self._editing_clip_backup = None
+        self._clip_cancel_pending_resume()
+        self._clip_triggered_event_ids.clear()
+        self.eventsUpdated.emit(self.getEvents())
+        self._notify_clips_updated()
+        self.eventTypesUpdated.emit(self.getEventTypes())
+
+    def load_project_from_path(self, project_id: str, project_file_path: str):
+        """Carica uno specifico progetto da file associato al projectId."""
+        self.current_project_id = project_id
+        p = Path(project_file_path)
+        if not p.exists():
+            self.import_workspace_state({})
+            return
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.import_workspace_state(data)
+        except Exception as ex:
+            logging.warning(f"Errore caricamento progetto {project_id}: {ex}")
+            self.import_workspace_state({})
+
+    def save_project_to_path(self, project_file_path: str) -> bool:
+        """Salva lo stato corrente del workspace su file."""
+        p = Path(project_file_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(self.export_workspace_state(), f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as ex:
+            logging.warning(f"Errore salvataggio progetto: {ex}")
+            return False
+
+
+class _VideoDownloadWorker(QObject):
+    finished = pyqtSignal(str)
+    failed = pyqtSignal(str)
+    status = pyqtSignal(str)
+
+    def __init__(self, url: str, downloads_dir: str):
+        super().__init__()
+        self.url = url
+        self.downloads_dir = Path(downloads_dir)
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_template = str((self.downloads_dir / f"%(title).100s-{ts}-%(id)s.%(ext)s").absolute())
+            cmd = [
+                "yt-dlp",
+                "--no-playlist",
+                "--no-warnings",
+                "--newline",
+                "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+                "--merge-output-format", "mp4",
+                "--print", "after_move:filepath",
+                "-o", output_template,
+                self.url
+            ]
+
+            self.status.emit("Download in corso...")
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            )
+
+            maybe_file = None
+            percent_re = re.compile(r"(\d+(?:\.\d+)?)%")
+            for line in proc.stdout:
+                txt = (line or "").strip()
+                if not txt:
+                    continue
+                pct = percent_re.search(txt)
+                if pct:
+                    self.status.emit(f"Download {pct.group(1)}%")
+                if txt.lower().endswith((".mp4", ".mkv", ".webm", ".mov", ".m4v")):
+                    maybe_file = txt
+
+            return_code = proc.wait()
+            if return_code != 0:
+                self.failed.emit("Impossibile scaricare il video dal link fornito.")
+                return
+
+            if maybe_file and Path(maybe_file).exists():
+                self.finished.emit(str(Path(maybe_file).absolute()))
+                return
+
+            latest = self._latest_downloaded_video()
+            if latest:
+                self.finished.emit(str(latest.absolute()))
+                return
+
+            self.failed.emit("Download completato ma file non trovato.")
+        except Exception as ex:
+            self.failed.emit(f"Errore download: {ex}")
+
+    def _latest_downloaded_video(self):
+        candidates = []
+        for ext in ("*.mp4", "*.mkv", "*.webm", "*.mov", "*.m4v"):
+            candidates.extend(self.downloads_dir.glob(ext))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: p.stat().st_mtime)

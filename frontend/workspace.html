@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Football Analyzer Workspace</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="workspace-body">
+    <div class="app-shell workspace-shell">
+        <div class="topbar" id="appTopbar">
+            <div class="topbar-left">
+                <button class="topbar-btn" id="btnBackProjects">← Progetti</button>
+                <div class="topbar-title">Roma vs Milan - Analisi</div>
+            </div>
+            <div class="topbar-right">
+                <button class="topbar-btn topbar-action" id="btnSaveProject">Salva</button>
+                <button class="topbar-btn topbar-action" id="btnExportProject">Esporta</button>
+                <div class="window-controls">
+                    <button class="topbar-btn win-btn" id="btnWinMin">—</button>
+                    <button class="topbar-btn win-btn" id="btnWinMax">□</button>
+                    <button class="topbar-btn win-btn close" id="btnWinClose">✕</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-layout workspace-main-layout sidebar-left">
+            <div class="sidebar-container">
+                <div class="sidebar-section">
+                    <h2 class="section-title">EVENTI</h2>
+                    <button class="btn-accent btn-open-video" id="btnOpenVideo">
+                        📂 Apri Video
+                    </button>
+                    <button class="btn-secondary btn-crea-evento" id="btnCreaEvento">
+                        Crea Evento
+                    </button>
+                    <div class="event-buttons" id="eventButtons">
+                        <!-- Eventi generati dinamicamente -->
+                    </div>
+                    <button class="btn-secondary btn-modifica-pulsanti" id="btnModificaPulsanti">
+                        Modifica Pulsanti Evento
+                    </button>
+                    <div class="event-list-section">
+                        <label class="event-list-label">Lista eventi:</label>
+                        <div class="event-list-container" id="eventsList">
+                            <!-- Eventi caricati dinamicamente -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QWebChannel bridge -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

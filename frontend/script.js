@@ -36,15 +36,63 @@ let eventTypes = {};  // event_type_id → { name, emoji }
 let drawingSystem = null; // Drawing system instance
 const triggeredEventIds = new Set();  // eventi già messi in pausa, reset su seek indietro
 let lastTimeUpdateMs = 0;
+let clipPlaybackActive = false;
+let currentClips = [];
+let frontendReadyNotified = false;
+let isPlaying = false;
+
+document.addEventListener('DOMContentLoaded', () => {
+    initRightSidebarTabs();
+});
 
 // Inizializza comunicazione con Python
 new QWebChannel(qt.webChannelTransport, function(channel) {
     backend = channel.objects.backend;
-    console.log('✅ Backend connesso');
+    window.backendBridge = backend;
+    console.log("Backend connesso");
+
+    const clipsContainer = document.getElementById("clipsContainer");
+    if (clipsContainer && clipsContainer.dataset.clipActionsBound !== "1") {
+        clipsContainer.dataset.clipActionsBound = "1";
+        clipsContainer.addEventListener("click", function (e) {
+
+            const btn = e.target.closest(".clip-btn");
+            if (!btn) return;
+
+            const clipId = btn.dataset.id;
+            if (!clipId) return;
+
+            const action = btn.dataset.action;
+            if (!action) return;
+
+            if (action === "play") {
+                if (typeof backend.toggleClipPlayback === "function") {
+                    backend.toggleClipPlayback(clipId);
+                } else if (typeof backend.playClip === "function") {
+                    backend.playClip(clipId);
+                }
+            }
+
+            if (action === "edit" && typeof backend.editClip === "function") {
+                backend.editClip(clipId);
+            }
+
+            if (action === "copy") {
+                if (typeof backend.copyClip === "function") {
+                    backend.copyClip(clipId);
+                } else if (typeof backend.restartClip === "function") {
+                    backend.restartClip(clipId);
+                }
+            }
+        });
+    }
     
     // Registra listener per aggiornamenti dal backend
     backend.clipsUpdated.connect(onClipsUpdated);
     backend.statusChanged.connect(onStatusChanged);
+    if (backend.playbackStateChanged && backend.playbackStateChanged.connect) {
+        backend.playbackStateChanged.connect(setPlayPauseButton);
+    }
     backend.eventsUpdated.connect(onEventsUpdated);  // Timeline events
     backend.eventCreated.connect(onEventCreated);    // Evento appena creato → selezione card
     backend.eventTypesUpdated.connect(onEventTypesUpdated);  // Event buttons refresh
@@ -58,10 +106,78 @@ new QWebChannel(qt.webChannelTransport, function(channel) {
 
     // Richiedi dati iniziali
     requestInitialData();
+    if (typeof backend.isVideoPlaying === 'function') {
+        setPlayPauseButton(!!backend.isVideoPlaying());
+    } else {
+        setPlayPauseButton(false);
+    }
+    notifyFrontendReady();
     
     // Tab e statistiche nella sidebar destra
     initRightSidebarTabs();
+
+    // Topbar web (drag + controlli finestra)
+    initWindowChrome();
 });
+
+function detectFrontendArea() {
+    const body = document.body;
+    if (!body) return '';
+    if (body.classList.contains('sidebar-left')) return 'left';
+    if (body.classList.contains('sidebar-right')) return 'right';
+    if (body.classList.contains('center-body')) return 'center';
+    return '';
+}
+
+function notifyFrontendReady() {
+    if (frontendReadyNotified || !backend) return;
+    const area = detectFrontendArea();
+    if (!area) return;
+    if (typeof backend.frontendReady === 'function') {
+        backend.frontendReady(area);
+        frontendReadyNotified = true;
+    }
+}
+
+function initWindowChrome() {
+    if (!backend) return;
+
+    document.getElementById('btnBackProjects')?.addEventListener('click', () => {
+        backend.backToProjects();
+    });
+    document.getElementById('btnWinMin')?.addEventListener('click', () => {
+        backend.windowMinimize();
+    });
+    document.getElementById('btnWinMax')?.addEventListener('click', () => {
+        backend.windowToggleMaximize();
+    });
+    document.getElementById('btnWinClose')?.addEventListener('click', () => {
+        backend.windowClose();
+    });
+
+    // Placeholder actions (hook pronti per funzionalità future).
+    document.getElementById('btnSaveProject')?.addEventListener('click', () => console.log('Save action placeholder'));
+    document.getElementById('btnExportProject')?.addEventListener('click', () => console.log('Export action placeholder'));
+
+    const topbar = document.getElementById('appTopbar');
+    if (!topbar) return;
+
+    let dragging = false;
+    topbar.addEventListener('mousedown', (e) => {
+        if (e.target.closest('button')) return;
+        dragging = true;
+        backend.startWindowDrag(Math.round(e.screenX), Math.round(e.screenY));
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        backend.moveWindowDrag(Math.round(e.screenX), Math.round(e.screenY));
+    });
+    window.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        backend.endWindowDrag();
+    });
+}
 
 /**
  * Richiede dati iniziali dal backend
@@ -99,7 +215,10 @@ function requestInitialData() {
  */
 function onClipsUpdated(clipsJson) {
     const clips = ensureArray(safeJsonParse(clipsJson));
+    currentClips = clips;
+    clipPlaybackActive = clips.some(c => !!c.isActive);
     renderClips(clips);
+    updateActiveClipProgress(currentPosition);
 }
 
 /**
@@ -110,6 +229,16 @@ function onStatusChanged(status) {
     if (statusText) {
         statusText.textContent = status;
     }
+    if (status === 'Playing') setPlayPauseButton(true);
+    if (status === 'Paused') setPlayPauseButton(false);
+}
+
+function setPlayPauseButton(playing) {
+    isPlaying = !!playing;
+    const btn = document.getElementById('btnPlay');
+    if (!btn) return;
+    btn.textContent = isPlaying ? '⏸ Pausa' : '▶ Play';
+    btn.classList.toggle('btn-play', !isPlaying);
 }
 
 /**
@@ -142,8 +271,30 @@ function onTimeUpdated(timeJson) {
     const time = safeJsonParse(timeJson);
     if (time) {
         updateTimeline(time);
+        updateActiveClipProgress(time.current);
         checkEvents(time.current);
     }
+}
+
+function updateActiveClipProgress(currentMs) {
+    if (!Array.isArray(currentClips) || !currentClips.length) return;
+    const activeClip = currentClips.find(c => !!c.isActive);
+    if (!activeClip) return;
+    const card = document.querySelector(`.clip-card[data-clip-id="${activeClip.id}"]`);
+    if (!card) return;
+    const bar = card.querySelector('.clip-progress-bar');
+    const duration = Number(activeClip.duration) || 0;
+    if (duration <= 0) {
+        card.style.setProperty('--progress', '0%');
+        if (bar) bar.style.width = '0%';
+        return;
+    }
+    const start = Number(activeClip.start) || 0;
+    const now = Number.isFinite(Number(currentMs)) ? Number(currentMs) : start;
+    const pct = Math.max(0, Math.min(100, ((now - start) / duration) * 100));
+    const pctStr = `${pct.toFixed(2)}%`;
+    card.style.setProperty('--progress', pctStr);
+    if (bar) bar.style.width = pctStr;
 }
 
 /**
@@ -174,6 +325,12 @@ function checkEvents(currentMs) {
 
     if (reached) {
         triggeredEventIds.add(reached.id);
+        // Clip mode: pausa/auto-resume gestiti dal backend con timer per-clip.
+        if (clipPlaybackActive) {
+            highlightEventInList(reached.id);
+            return;
+        }
+        // Normal mode: pausa manuale su evento (comportamento storico).
         backend.videoPause();
         highlightEventInList(reached.id);
     }
@@ -211,72 +368,82 @@ function renderClips(clips) {
     if (!container) return;
 
     const arr = ensureArray(clips);
-    container.innerHTML = '';
-
-    arr.forEach(clip => {
-        const card = createClipCard(clip);
-        container.appendChild(card);
-    });
+    const normalized = arr.map(clip => ({
+        ...clip,
+        title: escapeHtml(clip.title || clip.name || 'Clip'),
+        time: escapeHtml(clip.time || formatTime(Number.isFinite(Number(clip.start)) ? Number(clip.start) : 0)),
+        progress: Number.isFinite(Number(clip.progress))
+            ? Math.max(0, Math.min(100, Number(clip.progress)))
+            : 0,
+    }));
+    container.innerHTML = normalized.map(createClipCard).join("");
 }
 
 /**
  * Crea una clip card
  */
 function createClipCard(clip) {
-    const card = document.createElement('div');
-    card.className = `clip-card ${clip.isPlaying ? 'playing' : ''}`;
-    card.dataset.clipId = clip.id;
-    
-    const editingActive = clip.isEditing;
-    card.innerHTML = `
-        <div class="clip-header">
-            <span class="clip-status-dot"></span>
-            <span class="clip-title">${escapeHtml(clip.name)}</span>
-        </div>
-        <div class="clip-duration">Durata: ${Math.floor(clip.duration / 1000)}s</div>
-        <div class="clip-actions-slot">
-            <div class="clip-actions" ${editingActive ? 'style="display:none"' : ''}>
-                <button class="btn-primary" onclick="playClip('${clip.id}')">
-                    Riproduci
-                </button>
-                <button class="btn-secondary" onclick="editClip('${clip.id}')">
-                    Modifica
-                </button>
-            </div>
-            <div class="clip-editing" ${editingActive ? '' : 'style="display:none"'}>
-                <div class="edit-buttons">
-                    <button class="btn-secondary" onclick="updateClipStart('${clip.id}')">
-                        Aggiorna Inizio
-                    </button>
-                    <button class="btn-secondary" onclick="updateClipEnd('${clip.id}')">
-                        Aggiorna Fine
+    const editingActive = !!clip.isEditing;
+    return `
+        <div class="clip-card ${clip.isActive ? 'playing' : ''}" data-clip-id="${clip.id}" style="--progress:${clip.progress || 0}%">
+            <div class="clip-content">
+                <div class="clip-header">
+                    <div>
+                        <div class="clip-title">${clip.title}</div>
+                        <div class="clip-time">${clip.time}</div>
+                    </div>
+
+                    <div class="clip-actions" ${editingActive ? 'style="display:none"' : ''}>
+                        <button class="clip-btn" data-id="${clip.id}" data-action="copy">C</button>
+                        <button class="clip-btn ${clip.isPlaying ? 'playing' : ''}" data-id="${clip.id}" data-action="play">${clip.isPlaying ? '❚❚' : '▶'}</button>
+                        <button class="clip-btn edit" data-id="${clip.id}" data-action="edit">Modifica</button>
+                    </div>
+                </div>
+
+                <div class="clip-editing" ${editingActive ? '' : 'style="display:none"'}>
+                    <div class="edit-buttons">
+                        <button class="btn-secondary" onclick="updateClipStart('${clip.id}')">
+                            Aggiorna Inizio
+                        </button>
+                        <button class="btn-secondary" onclick="updateClipEnd('${clip.id}')">
+                            Aggiorna Fine
+                        </button>
+                    </div>
+                    <div class="clip-edit-row">
+                        <label class="clip-edit-label" for="clipPauseDuration_${clip.id}">
+                            Durata Pausa
+                        </label>
+                        <input
+                            id="clipPauseDuration_${clip.id}"
+                            class="clip-edit-input"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value="${Number.isFinite(Number(clip.pause_duration_sec)) ? Math.max(0, Number(clip.pause_duration_sec)) : 3}"
+                        />
+                    </div>
+                    <div class="edit-actions">
+                        <button class="btn-primary btn-save-gradient" onclick="saveClipEdit('${clip.id}')">
+                            Salva
+                        </button>
+                        <button class="btn-cancel" onclick="cancelClipEdit('${clip.id}')">
+                            Annulla
+                        </button>
+                    </div>
+                </div>
+
+                <div class="clip-progress">
+                    <div class="clip-progress-bar"></div>
+                </div>
+
+                <div class="clip-delete">
+                    <button class="btn-delete" onclick="deleteClip('${clip.id}', this)">
+                        Elimina
                     </button>
                 </div>
-                <div class="edit-actions">
-                    <button class="btn-primary btn-save-gradient" onclick="saveClipEdit('${clip.id}')">
-                        Salva
-                    </button>
-                    <button class="btn-cancel" onclick="cancelClipEdit('${clip.id}')">
-                        Annulla
-                    </button>
-                </div>
             </div>
-        </div>
-        <div class="clip-delete">
-            <button class="btn-delete" onclick="deleteClip('${clip.id}')">
-                Elimina
-            </button>
         </div>
     `;
-    
-    // Click sulla card (escluso pulsanti) → play
-    card.addEventListener('click', (e) => {
-        if (!e.target.closest('button') && !clip.isEditing) {
-            playClip(clip.id);
-        }
-    });
-    
-    return card;
 }
 
 // Editing functions
@@ -294,7 +461,10 @@ function updateClipEnd(clipId) {
 
 function saveClipEdit(clipId) {
     if (backend) {
-        backend.saveClipEdit(clipId);
+        const input = document.getElementById(`clipPauseDuration_${clipId}`);
+        const raw = input ? parseInt(input.value, 10) : 3;
+        const pauseDurationSec = Number.isFinite(raw) ? Math.max(0, raw) : 3;
+        backend.saveClipEdit(clipId, pauseDurationSec);
     }
 }
 
@@ -418,6 +588,19 @@ function renderEventList(events) {
             eliminaItem.addEventListener('mouseleave', () => { eliminaItem.style.background = 'transparent'; });
             eliminaItem.addEventListener('click', (ev) => {
                 ev.stopPropagation();
+                const armed = eliminaItem.dataset.confirmDelete === '1';
+                if (!armed) {
+                    eliminaItem.dataset.confirmDelete = '1';
+                    eliminaItem.textContent = 'Conferma';
+                    setTimeout(() => {
+                        if (eliminaItem.dataset.confirmDelete === '1') {
+                            eliminaItem.dataset.confirmDelete = '0';
+                            eliminaItem.textContent = 'Elimina';
+                        }
+                    }, 2500);
+                    return;
+                }
+                eliminaItem.dataset.confirmDelete = '0';
                 if (backend) backend.deleteEvent(evt.id);
                 if (menu.parentNode) {
                     document.body.removeChild(menu);
@@ -491,12 +674,45 @@ function editClip(clipId) {
     showClipEditingUI(clipId);
 }
 
-function deleteClip(clipId) {
+function pauseClip(clipId) {
     if (!backend) return;
-    if (confirm('Eliminare questa clip?')) {
-        console.log('🗑 Delete clip:', clipId);
+    backend.pauseClip(clipId);
+}
+
+function toggleClipPlayback(clipId) {
+    if (!backend) return;
+    backend.toggleClipPlayback(clipId);
+}
+
+function restartClip(clipId) {
+    if (!backend) return;
+    backend.restartClip(clipId);
+}
+
+function deleteClip(clipId, btnEl) {
+    if (!backend) return;
+    if (!btnEl) {
         backend.deleteClip(clipId);
+        return;
     }
+    const armed = btnEl.dataset.confirmDelete === '1';
+    if (!armed) {
+        btnEl.dataset.confirmDelete = '1';
+        const prevText = btnEl.textContent;
+        btnEl.textContent = 'Conferma';
+        btnEl.dataset.prevText = prevText;
+        setTimeout(() => {
+            if (btnEl.dataset.confirmDelete === '1') {
+                btnEl.dataset.confirmDelete = '0';
+                btnEl.textContent = btnEl.dataset.prevText || 'Elimina';
+            }
+        }, 2500);
+        return;
+    }
+    btnEl.dataset.confirmDelete = '0';
+    btnEl.textContent = btnEl.dataset.prevText || 'Elimina';
+    console.log('🗑 Delete clip:', clipId);
+    backend.deleteClip(clipId);
 }
 
 function createEvent(eventTypeId) {
@@ -597,11 +813,7 @@ document.getElementById('btnFrame')?.addEventListener('click', () => {
 });
 
 document.getElementById('btnPlay')?.addEventListener('click', () => {
-    if (backend) backend.videoPlay();
-});
-
-document.getElementById('btnPause')?.addEventListener('click', () => {
-    if (backend) backend.videoPause();
+    if (backend) backend.togglePlayPause();
 });
 
 document.getElementById('btnRewind')?.addEventListener('click', () => {
@@ -638,6 +850,12 @@ document.getElementById('btnClipStart')?.addEventListener('click', () => {
 
 document.getElementById('btnClipEnd')?.addEventListener('click', () => {
     if (backend) backend.clipEnd();
+});
+
+document.getElementById('btnExport')?.addEventListener('click', () => {
+    if (backend && typeof backend.openHighlightsStudio === 'function') {
+        backend.openHighlightsStudio();
+    }
 });
 
 /**
@@ -749,11 +967,11 @@ function drawTimeline() {
     timelineCtx.clearRect(0, 0, w, h);
     
     // Background track
-    timelineCtx.fillStyle = '#243447';
+    timelineCtx.fillStyle = '#1B2636';
     roundRect(timelineCtx, padding, barY, barW, barH, 4, true, false);
     
     // Border
-    timelineCtx.strokeStyle = '#30363D';
+    timelineCtx.strokeStyle = 'rgba(255,255,255,0.06)';
     timelineCtx.lineWidth = 1;
     roundRect(timelineCtx, padding, barY, barW, barH, 4, false, true);
     
@@ -761,19 +979,26 @@ function drawTimeline() {
         // Progress bar (position indicator fill)
         const progressPct = currentPosition / currentDuration;
         const progressW = progressPct * barW;
-        timelineCtx.fillStyle = '#12a88a';
+        const progressGradient = timelineCtx.createLinearGradient(padding, 0, padding + barW, 0);
+        progressGradient.addColorStop(0, '#1F8F6B');
+        progressGradient.addColorStop(1, '#2CF2B3');
+        timelineCtx.fillStyle = progressGradient;
         roundRect(timelineCtx, padding, barY, progressW, barH, 4, true, false);
         
         // Position line
         const posX = padding + progressW;
-        timelineCtx.strokeStyle = '#12a88a';
+        timelineCtx.strokeStyle = '#1F8F6B';
         timelineCtx.lineWidth = 2;
+        timelineCtx.shadowColor = 'rgba(44, 242, 179, 0.35)';
+        timelineCtx.shadowBlur = 8;
         timelineCtx.beginPath();
         timelineCtx.moveTo(posX, barY - 4);
         timelineCtx.lineTo(posX, barY + barH + 4);
         timelineCtx.stroke();
+        timelineCtx.shadowBlur = 0;
         
         // Event markers
+        timelineCtx.globalAlpha = 0.8;
         eventsData.forEach(evt => {
             const evtPct = evt.timestamp_ms / currentDuration;
             const evtX = padding + evtPct * barW;
@@ -781,9 +1006,10 @@ function drawTimeline() {
             
             timelineCtx.fillStyle = color;
             timelineCtx.beginPath();
-            timelineCtx.arc(evtX, barY, 5, 0, Math.PI * 2);
+            timelineCtx.arc(evtX, barY - 6, 4, 0, Math.PI * 2);
             timelineCtx.fill();
         });
+        timelineCtx.globalAlpha = 1;
     }
 }
 
@@ -960,6 +1186,7 @@ function initDrawingTools() {
         'toolCurvedArrow': 'curved_arrow',
         'toolParabola': 'parabola_arrow',
         'toolRect': 'rect',
+        'toolPolygon': 'polygon',
         'toolText': 'text',
         'toolPencil': 'pencil'
     };
@@ -1000,12 +1227,30 @@ function initDrawingTools() {
 }
 
 /**
- * Tab Statistiche | Clip nella sidebar destra (stats button; tab switch è in sidebar_right inline)
+ * Tab Statistiche | Clip nella sidebar destra.
  */
 function initRightSidebarTabs() {
+    const tabButtons = document.querySelectorAll('.right-tab-btn');
+    const tabContents = document.querySelectorAll('.right-tab-content');
+    if (tabButtons.length && tabContents.length) {
+        tabButtons.forEach(btn => {
+            if (btn.dataset.tabsBound === '1') return;
+            btn.dataset.tabsBound = '1';
+            btn.addEventListener('click', function() {
+                const tabId = this.getAttribute('data-tab');
+                tabButtons.forEach(b => b.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                this.classList.add('active');
+                const targetId = tabId === 'statistiche' ? 'tabStatistiche' : 'tabClip';
+                document.getElementById(targetId)?.classList.add('active');
+            });
+        });
+    }
+
     const btnRefresh = document.getElementById('btnRefreshStats');
     const statsOutput = document.getElementById('statsOutput');
-    if (btnRefresh && statsOutput && backend) {
+    if (btnRefresh && statsOutput && backend && btnRefresh.dataset.statsBound !== '1') {
+        btnRefresh.dataset.statsBound = '1';
         btnRefresh.addEventListener('click', () => {
             const json = backend.getStatistics();
             const data = safeJsonParse(json);
