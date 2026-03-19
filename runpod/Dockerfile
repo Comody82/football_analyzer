@@ -1,9 +1,9 @@
-# ─── Base image: PyTorch 2.4 + CUDA 12.1 (runtime, più leggera) ───────────────
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+# ─── Base: Python 3.11 slim (PyTorch installato via pip con CUDA 12.1) ─────────
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Dipendenze di sistema necessarie per OpenCV
+# Dipendenze di sistema per OpenCV e git
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     libgl1-mesa-glx \
@@ -11,7 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Dipendenze Python
+# PyTorch 2.4.0 con CUDA 12.1 (via pip ufficiale)
+RUN pip install --no-cache-dir \
+    torch==2.4.0 torchvision==0.19.0 \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Altre dipendenze
 COPY runpod/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -28,7 +33,6 @@ COPY runpod/handler.py /app/handler.py
 # Directory modelli (il modello viene scaricato da R2 al primo avvio)
 RUN mkdir -p /app/models
 
-# Variabili d'ambiente (sostituite a runtime con i secrets di RunPod)
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1
 
