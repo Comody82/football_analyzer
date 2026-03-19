@@ -22,11 +22,12 @@ RUN pip install --no-cache-dir \
 COPY runpod/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Installa Cython (richiesto da pycocotools che è dipendenza di YOLOX)
-RUN pip install --no-cache-dir Cython
+# Installa pycocotools (dipendenza YOLOX che richiede compilazione C)
+RUN pip install --no-cache-dir Cython && \
+    pip install --no-cache-dir pycocotools
 
-# Installa YOLOX da PyPI
-RUN pip install --no-cache-dir yolox
+# Installa YOLOX senza risolvere dipendenze torch (già installato sopra)
+RUN pip install --no-cache-dir --no-deps yolox
 
 # Copia codice dell'app
 COPY analysis/ /app/analysis/
