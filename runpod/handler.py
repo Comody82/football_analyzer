@@ -148,26 +148,41 @@ def handler(job):
         if not success:
             return {"error": f"Detection fallita: {err}"}
 
-        # Leggi risultati
-        with open(tmp_result, "r", encoding="utf-8") as f:
-            detections = json.load(f)
+        # Esegui tracking (aggiunge track_id stabile per ogni giocatore)
+        tmp_tracks = tmp_video.replace(".mp4", "_tracks.json")
+        LOG.info("Starting player tracking...")
+        from analysis.player_tracking import run_player_tracking
+        tracking_ok = run_player_tracking(
+            detections_path=tmp_result,
+            output_path=tmp_tracks,
+            max_age=30,
+            iou_thresh=0.3,
+        )
+        # Usa tracks se disponibili, altrimenti fallback su detections
+        result_file = tmp_tracks if tracking_ok and Path(tmp_tracks).exists() else tmp_result
+        LOG.info("Using result file: %s", result_file)
+
+        # Leggi risultati finali
+        with open(result_file, "r", encoding="utf-8") as f:
+            result_data = json.load(f)
 
         # Calcola sommario
-        n_frames = len(detections.get("frames", []))
-        all_dets = [d for fr in detections["frames"] for d in fr.get("detections", [])]
+        n_frames = len(result_data.get("frames", []))
+        all_dets = [d for fr in result_data["frames"] for d in fr.get("detections", [])]
         n_players = sum(1 for d in all_dets if d.get("role") in ("player", "goalie"))
         n_balls = sum(1 for d in all_dets if d.get("role") == "ball")
+        n_tracks = len(result_data.get("tracks", {}))
 
         # Carica risultato su R2
-        LOG.info("Uploading results (%d frames)...", n_frames)
+        LOG.info("Uploading results (%d frames, %d tracks)...", n_frames, n_tracks)
         if result_put_url:
-            _upload_result_presigned(tmp_result, result_put_url)
+            _upload_result_presigned(result_file, result_put_url)
             result_url = result_url_out or "uploaded"
         else:
             # Fallback: boto3 con env vars
             video_name = Path(video_url.split("?")[0]).stem  # rimuovi query string pre-signed
-            result_key = f"results/{video_name}_detections.json"
-            result_url = _upload_result_boto3(tmp_result, result_key)
+            result_key = f"results/{video_name}_tracks.json"
+            result_url = _upload_result_boto3(result_file, result_key)
         LOG.info("Results uploaded: %s", result_url)
 
         return {
@@ -177,9 +192,10 @@ def handler(job):
                 "frames_analyzed": n_frames,
                 "total_player_detections": n_players,
                 "total_ball_detections": n_balls,
-                "video_fps": detections.get("fps", 0),
-                "width": detections.get("width", 0),
-                "height": detections.get("height", 0),
+                "unique_tracks": n_tracks,
+                "video_fps": result_data.get("fps", 0),
+                "width": result_data.get("width", 0),
+                "height": result_data.get("height", 0),
             },
         }
 
@@ -188,7 +204,8 @@ def handler(job):
         return {"error": str(e)}
 
     finally:
-        for p in [tmp_video, tmp_result]:
+        tmp_tracks_local = locals().get("tmp_tracks")
+        for p in [tmp_video, tmp_result, tmp_tracks_local]:
             if p and Path(p).exists():
                 try:
                     Path(p).unlink()
