@@ -40,13 +40,15 @@ class PlaylistItem:
 
 class Project:
     """Progetto di analisi video."""
-    
+
     def __init__(self):
         self.video_path: Optional[str] = None
         self.duration_ms: int = 0
         self.drawings: List[DrawingItem] = []
         self.playlist: List[PlaylistItem] = []
         self._drawing_counter = 0
+        # Metadati partita (per Crea Immagine / copertina highlights)
+        self.match_metadata: Dict[str, Any] = {}
 
     def add_drawing(self, drawing: DrawingItem) -> None:
         self._drawing_counter += 1
@@ -89,7 +91,8 @@ class Project:
                 {"clip_path": p.clip_path, "start_ms": p.start_ms, "end_ms": p.end_ms,
                  "label": p.label, "event_id": p.event_id}
                 for p in self.playlist
-            ]
+            ],
+            "match_metadata": dict(self.match_metadata) if self.match_metadata else {},
         }
 
     def from_dict(self, d: dict):
@@ -103,6 +106,7 @@ class Project:
             )
             for c in d.get("playlist", [])
         ]
+        self.match_metadata = dict(d.get("match_metadata") or {})
 
     def save(self, path: str) -> bool:
         try:

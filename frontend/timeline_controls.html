@@ -5,8 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Controlli</title>
     <link rel="stylesheet" href="styles.css">
+    <style>
+    .nebula-bg {
+        position: fixed !important; inset: 0 !important; z-index: 99999 !important; pointer-events: none !important;
+        background:
+            repeating-linear-gradient(0deg, transparent 0, rgba(255,255,255,0.015) 1px, transparent 2px),
+            repeating-linear-gradient(90deg, transparent 0, rgba(255,255,255,0.008) 1px, transparent 2px),
+            radial-gradient(circle 25% at 12% 18%, rgba(135,110,125,0.75) 0%, rgba(113,92,102,0.45) 45%, transparent 65%),
+            radial-gradient(circle 20% at 90% 12%, rgba(130,105,118,0.7) 0%, transparent 58%),
+            radial-gradient(circle 28% at 78% 82%, rgba(113,92,102,0.65) 0%, rgba(100,82,92,0.3) 50%, transparent 70%),
+            radial-gradient(circle 22% at 18% 78%, rgba(125,100,112,0.7) 0%, transparent 60%),
+            radial-gradient(circle 18% at 55% 35%, rgba(113,92,102,0.65) 0%, transparent 55%),
+            radial-gradient(circle 24% at 42% 58%, rgba(120,98,108,0.6) 0%, transparent 60%),
+            radial-gradient(circle 20% at 88% 55%, rgba(118,95,106,0.7) 0%, transparent 58%),
+            radial-gradient(circle 16% at 5% 90%, rgba(113,92,102,0.65) 0%, transparent 52%),
+            linear-gradient(180deg, #0e1626 0%, #0B1320 50%, #080d18 100%) !important;
+    }
+    body.center-body > .controls-container > .progress-section,
+    body.center-body > .controls-container > .timeline-events-section,
+    body.center-body > .controls-container > .draw-tools-section,
+    body.center-body .ctrl-row {
+        background: transparent !important; backdrop-filter: none !important;
+    }
+    </style>
 </head>
 <body class="center-body">
+    <div class="nebula-bg" aria-hidden="true"></div>
     <div class="controls-container">
         <div class="progress-section">
             <div class="timeline-track" id="mainTimelineTrack">
@@ -30,6 +54,13 @@
                 <span id="totalTime">00:00</span>
             </div>
             <button class="btn-control" id="btnShortcuts" title="Scorciatoie da tastiera (F1)">⌨ ?</button>
+            <button class="btn-control" id="btnZoom" title="Zoom (rotella mouse sul video)">🔍 Zoom</button>
+            <button class="btn-control" id="btnZoomZone" title="Disegna zona zoom (solo quella zona ingrandita)">📐 Zoom Zone</button>
+            <div class="zoom-bar-wrapper" title="Livello zoom (1x–5x)">
+                <label class="zoom-label" for="zoomSlider">Zoom</label>
+                <input type="range" class="zoom-slider zoom-slider-readonly" id="zoomSlider" min="1" max="5" step="0.1" value="1" title="Indicatore zoom (usa rotella mouse sul video)">
+                <span class="zoom-value" id="zoomValue">1x</span>
+            </div>
         </div>
 
         <div class="timeline-events-section">
@@ -53,6 +84,24 @@
                 <button class="tool-btn" id="toolPencil" title="Matita">✎</button>
                 <button class="btn-control draw-action-btn" id="btnDrawColor" title="Colore / Spessore">Colore / Spessore</button>
                 <button class="btn-control draw-action-btn" id="btnClearDrawings" title="Cancella disegni">Cancella disegni</button>
+            </div>
+        </div>
+        <div class="analysis-section draw-tools-section">
+            <label class="draw-tools-label">Analisi</label>
+            <div class="analysis-buttons-row">
+                <button class="btn-control btn-analysis-main" id="btnFullAnalysis" title="Esegue in sequenza: preprocesso (opzionale), player detection/tracking, ball detection/tracking, clustering squadre">⚡ Analisi automatica</button>
+                <button class="btn-control" id="btnShowTracking" title="Mostra/nascondi tracking sul video">👁 Mostra tracking</button>
+            </div>
+            <div class="analysis-step-section">
+                <label class="draw-tools-sublabel">Analisi step-by-step</label>
+                <div class="analysis-buttons-row">
+                    <button class="btn-control" id="btnFieldCalibration" title="Calibra il campo per analisi (pixel → metri)">📐 Calibra campo</button>
+                    <button class="btn-control" id="btnVideoPreprocessing" title="Preprocessa video (720p, 25fps) per analisi">🎬 Preprocessa video</button>
+                    <button class="btn-control" id="btnPlayerDetection" title="Rileva giocatori (YOLOX) e classifica squadre">👥 Player detection</button>
+                    <button class="btn-control" id="btnPlayerTracking" title="Traccia giocatori tra i frame (ID stabili)">🎯 Player tracking</button>
+                    <button class="btn-control" id="btnBallDetection" title="Rileva e traccia la palla">⚽ Ball detection</button>
+                    <button class="btn-control" id="btnReclusterTeams" title="Ricalcola solo assegnazione squadre (clustering globale)">🔄 Ricalcola squadre</button>
+                </div>
             </div>
         </div>
     </div>

@@ -1429,9 +1429,20 @@ class WorkspacePage(QWidget):
         if not video_path or not os.path.isfile(video_path):
             QMessageBox.warning(self.window(), "Analisi in cloud", "Apri prima un video valido.")
             return
+        # Usa il video preprocessato se disponibile (risoluzione ridotta → più veloce)
+        project_dir = self._get_project_analysis_dir()
+        if project_dir:
+            try:
+                from analysis.video_preprocessing import get_preprocessed_path
+                pp = get_preprocessed_path(project_dir)
+                if pp.exists():
+                    video_path = str(pp)
+                    logging.info("Cloud analysis: uso video preprocessato %s", video_path)
+            except Exception:
+                pass
         options = {
             "conf_thresh": 0.3,
-            "target_fps": 5.0,
+            "target_fps": 3.0,  # 3 fps → meno frame, più veloce, entro timeout RunPod
         }
         dlg = CloudAnalysisDialog(video_path, options, parent=self.window())
         dlg.finished_ok.connect(self._on_cloud_result_ready)
@@ -1444,7 +1455,22 @@ class WorkspacePage(QWidget):
         self._analysis_in_progress = False
 
     def _on_cloud_result_ready(self, payload: dict):
-        """Risultato analisi cloud pronto: carica in UI unificata."""
+        """Risultato analisi cloud pronto: salva su disco + carica in UI unificata."""
+        # Salva player_tracks su disco → _load_tracking_overlay() lo trova normalmente
+        try:
+            project_dir = self._get_project_analysis_dir()
+            if project_dir:
+                from analysis.player_tracking import get_tracks_path
+                tracks_data = (payload.get("tracking") or {}).get("player_tracks")
+                if tracks_data:
+                    tracks_path = get_tracks_path(project_dir)
+                    import json as _json
+                    with open(tracks_path, "w", encoding="utf-8") as f:
+                        _json.dump(tracks_data, f)
+                    logging.info("Cloud tracks salvati su disco: %s", tracks_path)
+        except Exception as e:
+            logging.warning("Salvataggio cloud tracks su disco fallito: %s", e)
+
         self.load_analysis_result(result_payload=payload)
         QMessageBox.information(
             self.window(),

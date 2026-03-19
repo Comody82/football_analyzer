@@ -217,6 +217,25 @@
 
 ---
 
+### 🗺️ Lavagna Tattica 2D Sincronizzata al Video (Prelyt Tactics)
+> Visualizzazione tattica in tempo reale: i giocatori si muovono sulla mappa 2D del campo seguendo il minutaggio del video.
+
+- [ ] **Campo stilizzato 2D**: rendering vettoriale SVG/Canvas del campo da calcio (linee bianche su fondo verde) nella stessa pagina del video player
+- [ ] **Giocatori come pallini numerati**: ogni track_id = un pallino colorato (colore squadra) con numero sopra
+  - Squadra 0 → cerchio rosso/bianco; Squadra 1 → cerchio blu/bianco; Arbitro → cerchio giallo
+  - Numero = track_id (o numero maglia se disponibile)
+- [ ] **Sincronizzazione al frame**: la posizione dei pallini si aggiorna a ogni frame del video durante la riproduzione
+  - Lettura da `player_tracks.json` → `frames[i].detections[j].{x, y, track_id, team}`
+  - Mappatura coordinate video → coordinate campo reale (homography o proporzione semplice)
+- [ ] **Tempo reale**: i pallini si muovono fluidi seguendo il cursore del video (play, scrubbing, +5s/-5s)
+- [ ] **Palla**: pallino bianco più piccolo per la palla (se rilevata)
+- [ ] **Layout affiancato**: lavagna tattica accanto (o sotto) al video player senza aprire nuove finestre
+- [ ] **Hover info**: passando il mouse su un pallino → mostra `track_id`, `team`, `conf`
+- [ ] **Fase 2**: scie di movimento (trail degli ultimi N frame per ogni giocatore)
+- [ ] **Fase 3**: esportazione snapshot PNG del campo in un dato momento
+
+---
+
 ### 🔍 Scouting (Prelyt Scout)
 - [ ] Database giocatori
 - [ ] Report individuali per giocatore

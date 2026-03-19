@@ -97,7 +97,13 @@ new QWebChannel(qt.webChannelTransport, function(channel) {
     backend.eventCreated.connect(onEventCreated);    // Evento appena creato → selezione card
     backend.eventTypesUpdated.connect(onEventTypesUpdated);  // Event buttons refresh
     backend.timeUpdated.connect(onTimeUpdated);  // Barra progresso
-    
+    if (backend.zoomUpdated && backend.zoomUpdated.connect) {
+        backend.zoomUpdated.connect(updateZoomBar);
+    }
+    if (backend.zoomZoneFactorUpdated && backend.zoomZoneFactorUpdated.connect) {
+        backend.zoomZoneFactorUpdated.connect(updateZoomBar);
+    }
+
     // Inizializza timeline canvas
     initTimelineCanvas();
     
@@ -123,6 +129,7 @@ new QWebChannel(qt.webChannelTransport, function(channel) {
 function detectFrontendArea() {
     const body = document.body;
     if (!body) return '';
+    if (body.classList.contains('workspace-unified')) return 'unified';
     if (body.classList.contains('sidebar-left')) return 'left';
     if (body.classList.contains('sidebar-right')) return 'right';
     if (body.classList.contains('center-body')) return 'center';
@@ -207,6 +214,10 @@ function requestInitialData() {
     const time = safeJsonParse(timeJson);
     if (time && (typeof time.duration === 'number' && time.duration > 0 || typeof time.current === 'number')) {
         updateTimeline(time);
+    }
+    if (typeof backend.getZoomLevel === 'function') {
+        const level = backend.getZoomLevel();
+        updateZoomBar(level);
     }
 }
 
@@ -603,7 +614,7 @@ function renderEventList(events) {
                 eliminaItem.dataset.confirmDelete = '0';
                 if (backend) backend.deleteEvent(evt.id);
                 if (menu.parentNode) {
-                    document.body.removeChild(menu);
+                    menu.parentNode.removeChild(menu);
                     eventContextMenuOpen = null;
                 }
             });
@@ -612,7 +623,7 @@ function renderEventList(events) {
             eventContextMenuOpen = menu;
             const close = () => {
                 if (menu.parentNode) {
-                    document.body.removeChild(menu);
+                    menu.parentNode.removeChild(menu);
                     eventContextMenuOpen = null;
                 }
                 document.removeEventListener('click', close);
@@ -777,7 +788,7 @@ function showSkipIntervalMenu(e) {
             }
             updateSkipButtonLabels();
             if (menu.parentNode) {
-                document.body.removeChild(menu);
+                menu.parentNode.removeChild(menu);
                 skipIntervalMenuOpen = null;
             }
         });
@@ -787,7 +798,7 @@ function showSkipIntervalMenu(e) {
     skipIntervalMenuOpen = menu;
     const close = () => {
         if (menu.parentNode) {
-            document.body.removeChild(menu);
+            menu.parentNode.removeChild(menu);
             skipIntervalMenuOpen = null;
         }
         document.removeEventListener('click', close);
@@ -801,6 +812,36 @@ document.getElementById('btnForward')?.addEventListener('contextmenu', showSkipI
 document.getElementById('btnRestart')?.addEventListener('click', () => {
     if (backend) {
         backend.restartVideo();
+    }
+});
+
+document.getElementById('btnZoom')?.addEventListener('click', () => {
+    if (!backend) return;
+    const btn = document.getElementById('btnZoom');
+    const wasActive = btn?.classList.contains('active');
+    if (wasActive) {
+        btn.classList.remove('active');
+        backend.setDrawTool('none');
+    } else {
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('btnZoomZone')?.classList.remove('active');
+        btn?.classList.add('active');
+        backend.setDrawTool('zoom');
+    }
+});
+
+document.getElementById('btnZoomZone')?.addEventListener('click', () => {
+    if (!backend) return;
+    const btn = document.getElementById('btnZoomZone');
+    const wasActive = btn?.classList.contains('active');
+    if (wasActive) {
+        btn.classList.remove('active');
+        backend.setDrawTool('none');
+    } else {
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('btnZoom')?.classList.remove('active');
+        btn?.classList.add('active');
+        backend.setDrawTool('zoom_zone');
     }
 });
 
@@ -843,6 +884,62 @@ document.getElementById('btnModificaPulsanti')?.addEventListener('click', () => 
 document.getElementById('btnShortcuts')?.addEventListener('click', () => {
     if (backend) backend.showShortcutsHelp();
 });
+
+document.getElementById('btnFullAnalysis')?.addEventListener('click', () => {
+    if (backend && typeof backend.openFullAnalysis === 'function') backend.openFullAnalysis();
+});
+
+document.getElementById('btnFieldCalibration')?.addEventListener('click', () => {
+    if (backend && typeof backend.openFieldCalibration === 'function') backend.openFieldCalibration();
+});
+
+document.getElementById('btnVideoPreprocessing')?.addEventListener('click', () => {
+    if (backend && typeof backend.openVideoPreprocessing === 'function') backend.openVideoPreprocessing();
+});
+
+document.getElementById('btnPlayerDetection')?.addEventListener('click', () => {
+    if (backend && typeof backend.openPlayerDetection === 'function') backend.openPlayerDetection();
+});
+
+document.getElementById('btnPlayerTracking')?.addEventListener('click', () => {
+    if (backend && typeof backend.openPlayerTracking === 'function') backend.openPlayerTracking();
+});
+
+document.getElementById('btnBallDetection')?.addEventListener('click', () => {
+    if (backend && typeof backend.openBallDetection === 'function') backend.openBallDetection();
+});
+
+document.getElementById('btnReclusterTeams')?.addEventListener('click', () => {
+    if (backend && typeof backend.openReclusterTeams === 'function') backend.openReclusterTeams();
+});
+
+document.getElementById('btnShowTracking')?.addEventListener('click', () => {
+    if (!backend || typeof backend.toggleTrackingOverlay !== 'function') return;
+    const res = backend.toggleTrackingOverlay();
+    const updateBtn = (visible) => {
+        const btn = document.getElementById('btnShowTracking');
+        if (btn) btn.textContent = visible ? '👁 Nascondi tracking' : '👁 Mostra tracking';
+    };
+    if (res && typeof res.then === 'function') {
+        res.then(updateBtn).catch(() => {});
+    } else {
+        updateBtn(!!res);
+    }
+});
+
+function updateZoomBar(level) {
+    const num = parseFloat(level);
+    if (isNaN(num)) return;
+    const slider = document.getElementById('zoomSlider');
+    const valueEl = document.getElementById('zoomValue');
+    if (slider) {
+        slider.value = Math.round(num * 10) / 10;
+        slider.style.setProperty('--zoom-pct', ((num - 1) / 4 * 100) + '%');
+    }
+    if (valueEl) valueEl.textContent = num <= 1 ? '1x' : num.toFixed(1) + 'x';
+}
+
+// Barra zoom: solo indicatore, zoom esclusivamente con rotella mouse
 
 document.getElementById('btnClipStart')?.addEventListener('click', () => {
     if (backend) backend.clipStart();
@@ -980,16 +1077,16 @@ function drawTimeline() {
         const progressPct = currentPosition / currentDuration;
         const progressW = progressPct * barW;
         const progressGradient = timelineCtx.createLinearGradient(padding, 0, padding + barW, 0);
-        progressGradient.addColorStop(0, '#1F8F6B');
-        progressGradient.addColorStop(1, '#2CF2B3');
+        progressGradient.addColorStop(0, '#3d5f8a');
+        progressGradient.addColorStop(1, '#5a82b5');
         timelineCtx.fillStyle = progressGradient;
         roundRect(timelineCtx, padding, barY, progressW, barH, 4, true, false);
         
         // Position line
         const posX = padding + progressW;
-        timelineCtx.strokeStyle = '#1F8F6B';
+        timelineCtx.strokeStyle = '#4a6fa5';
         timelineCtx.lineWidth = 2;
-        timelineCtx.shadowColor = 'rgba(44, 242, 179, 0.35)';
+        timelineCtx.shadowColor = 'rgba(74, 111, 165, 0.35)';
         timelineCtx.shadowBlur = 8;
         timelineCtx.beginPath();
         timelineCtx.moveTo(posX, barY - 4);
@@ -1104,18 +1201,18 @@ function showSpeedMenu(button) {
                 backend.setPlaybackRate(speed.rate);
             }
             button.textContent = speed.rate === 0 ? 'Frame' : speed.rate + 'x';
-            document.body.removeChild(menu);
+            if (menu.parentNode) menu.parentNode.removeChild(menu);
         });
         menu.appendChild(item);
     });
-    
+
     document.body.appendChild(menu);
-    
+
     // Close on click outside
     setTimeout(() => {
         const closeMenu = (e) => {
             if (!menu.contains(e.target) && e.target !== button) {
-                document.body.removeChild(menu);
+                if (menu.parentNode) menu.parentNode.removeChild(menu);
                 document.removeEventListener('click', closeMenu);
             }
         };
@@ -1199,6 +1296,8 @@ function initDrawingTools() {
                 Object.keys(toolButtons).forEach(id => {
                     document.getElementById(id)?.classList.remove('active');
                 });
+                document.getElementById('btnZoom')?.classList.remove('active');
+                document.getElementById('btnZoomZone')?.classList.remove('active');
                 if (!wasActive) {
                     btn.classList.add('active');
                     backend.setDrawTool(tool);
@@ -1217,6 +1316,8 @@ function initDrawingTools() {
                 Object.keys(toolButtons).forEach(id => {
                     document.getElementById(id)?.classList.remove('active');
                 });
+                document.getElementById('btnZoom')?.classList.remove('active');
+                document.getElementById('btnZoomZone')?.classList.remove('active');
                 backend.setDrawTool('none');
             }
         });
