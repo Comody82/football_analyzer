@@ -1,14 +1,14 @@
 """
 Client RunPod Serverless v2 – Football Analyzer / PRELYT
 Flusso:
-  1. Upload video su Cloudflare R2 (ottieni URL pubblico)
-  2. POST https://api.runpod.io/v2/{endpoint_id}/run  con {"input": {"video_url": url}}
-  3. Polling GET /status/{job_id} fino a COMPLETED o FAILED
-  4. Scarica JSON risultato da R2 (result_url nel payload)
+  1. Upload video su Cloudflare R2
+  2. Genera pre-signed URL per: modello (GET), video (GET), risultato (PUT)
+  3. POST https://api.runpod.ai/v2/{endpoint_id}/run  con {input: {video_url, model_url, ...}}
+  4. Polling GET /status/{job_id} fino a COMPLETED o FAILED
+  5. Il result_url nel payload punta al JSON dei risultati su R2
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -22,6 +22,7 @@ LOG = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 60
 POLL_INTERVAL_DEFAULT = 5
 RUNPOD_BASE = "https://api.runpod.ai/v2"
+PRESIGNED_EXPIRES = 7200  # 2 ore — sufficiente per qualsiasi job
 
 
 def _load_env():
@@ -46,6 +47,62 @@ def _endpoint_url(path: str = "") -> str:
     return f"{RUNPOD_BASE}/{endpoint_id}/{path.lstrip('/')}"
 
 
+def _r2_client():
+    """Crea boto3 S3 client per Cloudflare R2."""
+    import boto3
+    _load_env()
+    client = boto3.client(
+        "s3",
+        endpoint_url=os.environ["R2_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        region_name="auto",
+    )
+    bucket = os.environ.get("R2_BUCKET_NAME", "match-analysis-videos")
+    public_base = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
+    return client, bucket, public_base
+
+
+def _generate_presigned_urls(video_key: str) -> dict:
+    """
+    Genera pre-signed URL per:
+      - GET modello (models/best_ckpt.pth)
+      - GET video (video_key)
+      - PUT risultato (results/{stem}_detections.json)
+    Ritorna dict con model_url, video_url, result_put_url, result_url.
+    """
+    client, bucket, public_base = _r2_client()
+
+    model_url = client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": "models/best_ckpt.pth"},
+        ExpiresIn=PRESIGNED_EXPIRES,
+    )
+
+    video_url = client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": video_key},
+        ExpiresIn=PRESIGNED_EXPIRES,
+    )
+
+    video_stem = Path(video_key).stem
+    result_key = f"results/{video_stem}_detections.json"
+    result_put_url = client.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": bucket, "Key": result_key, "ContentType": "application/json"},
+        ExpiresIn=PRESIGNED_EXPIRES,
+    )
+    result_public_url = f"{public_base}/{result_key}"
+
+    return {
+        "model_url": model_url,
+        "video_url": video_url,
+        "result_put_url": result_put_url,
+        "result_url": result_public_url,
+        "result_key": result_key,
+    }
+
+
 def create_job(
     video_path: str,
     options: Optional[dict] = None,
@@ -53,19 +110,35 @@ def create_job(
 ) -> tuple[Optional[str], Optional[str]]:
     """
     1. Carica video su R2
-    2. POST /run con {"input": {"video_url": url, "options": ...}}
+    2. Genera pre-signed URL per modello, video e risultato
+    3. POST /run con {input: {video_url, model_url, result_put_url, result_url, options}}
     Returns (job_id, None) oppure (None, errore).
     """
     from r2_storage import upload_video
 
     remote_key = Path(video_path).name
     LOG.info("Uploading %s to R2...", video_path)
-    video_url, err = upload_video(video_path, remote_key, upload_progress_callback)
+    _, err = upload_video(video_path, remote_key, upload_progress_callback)
     if err:
         return None, f"Errore upload R2: {err}"
-    LOG.info("R2 URL: %s", video_url)
+    LOG.info("Video uploaded to R2: %s", remote_key)
 
-    payload = {"input": {"video_url": video_url, "options": options or {}}}
+    # Genera pre-signed URL (modello + video + risultato)
+    try:
+        urls = _generate_presigned_urls(remote_key)
+        LOG.info("Pre-signed URLs generati (scadono in %ds)", PRESIGNED_EXPIRES)
+    except Exception as e:
+        return None, f"Errore generazione pre-signed URL: {e}"
+
+    payload = {
+        "input": {
+            "video_url": urls["video_url"],
+            "model_url": urls["model_url"],
+            "result_put_url": urls["result_put_url"],
+            "result_url": urls["result_url"],
+            "options": options or {},
+        }
+    }
     try:
         r = requests.post(
             _endpoint_url("run"),
@@ -94,7 +167,6 @@ def get_status(job_id: str) -> tuple[Optional[dict], Optional[str]]:
     """
     GET /status/{job_id}
     Ritorna (status_dict, None) oppure (None, errore).
-    status_dict ha chiavi: id, status, output, error
     RunPod status: IN_QUEUE, IN_PROGRESS, COMPLETED, FAILED, CANCELLED, TIMED_OUT
     """
     try:
@@ -136,7 +208,7 @@ def run_poll_loop(
     """
     Polling /status/{job_id} ogni interval_seconds.
     Invoca on_event con dizionario normalizzato:
-      {job_id, status, progress, message, result_url}
+      {job_id, status, progress, message, result_url, error}
     Termina quando status è COMPLETED/FAILED o stop_check() è True.
     """
     TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}

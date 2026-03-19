@@ -1,6 +1,12 @@
 """
 RunPod Serverless Handler – Football Analyzer
-Input:  {"video_url": "https://...", "options": {}}
+Input:  {
+    "video_url":      "https://...presigned...",   # pre-signed GET URL del video
+    "model_url":      "https://...presigned...",   # pre-signed GET URL del modello
+    "result_put_url": "https://...presigned...",   # pre-signed PUT URL per i risultati
+    "result_url":     "https://...public...",      # URL pubblico risultato (passato dal client)
+    "options": {}
+}
 Output: {"status": "completed", "result_url": "https://...", "summary": {...}}
 """
 import json
@@ -19,20 +25,25 @@ sys.path.insert(0, "/app")
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-MODEL_URL = os.environ.get(
-    "MODEL_URL",
-    "https://pub-0dbac19cd9a943ff8d0baff780d52297.r2.dev/models/best_ckpt.pth",
-)
 MODEL_PATH = Path("/app/models/best_ckpt.pth")
 
 
-def _ensure_model():
-    """Scarica best_ckpt.pth da R2 via boto3 (credenziali da env vars)."""
+def _ensure_model(model_url: str = None):
+    """Scarica best_ckpt.pth. Usa model_url (pre-signed) se disponibile,
+    altrimenti tenta boto3 da env vars come fallback."""
     if MODEL_PATH.exists():
         LOG.info("Model already present: %.1f MB", MODEL_PATH.stat().st_size / 1e6)
         return
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LOG.info("Downloading model from R2 via boto3...")
+
+    if model_url:
+        LOG.info("Downloading model via pre-signed URL...")
+        urllib.request.urlretrieve(model_url, str(MODEL_PATH))
+        LOG.info("Model downloaded: %.1f MB", MODEL_PATH.stat().st_size / 1e6)
+        return
+
+    # Fallback: boto3 con credenziali da env vars
+    LOG.info("Downloading model from R2 via boto3 (fallback)...")
     import boto3
     endpoint = os.environ["R2_ENDPOINT_URL"]
     access_key = os.environ["R2_ACCESS_KEY_ID"]
@@ -49,16 +60,31 @@ def _ensure_model():
     LOG.info("Model downloaded: %.1f MB", MODEL_PATH.stat().st_size / 1e6)
 
 
-def _upload_result(local_path: str, remote_key: str) -> str:
-    """Carica JSON risultato su R2 e ritorna URL pubblico."""
-    import boto3
+def _upload_result_presigned(local_path: str, put_url: str):
+    """Carica JSON risultato via pre-signed PUT URL (nessuna credenziale richiesta)."""
+    import urllib.request
+    with open(local_path, "rb") as f:
+        data = f.read()
+    req = urllib.request.Request(
+        put_url,
+        data=data,
+        method="PUT",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        if resp.status not in (200, 204):
+            raise Exception(f"Upload risultato fallito: HTTP {resp.status}")
+    LOG.info("Risultato caricato via pre-signed PUT URL")
 
+
+def _upload_result_boto3(local_path: str, remote_key: str) -> str:
+    """Fallback: carica JSON risultato su R2 via boto3."""
+    import boto3
     endpoint = os.environ["R2_ENDPOINT_URL"]
     access_key = os.environ["R2_ACCESS_KEY_ID"]
     secret_key = os.environ["R2_SECRET_ACCESS_KEY"]
     bucket = os.environ.get("R2_BUCKET_NAME", "match-analysis-videos")
     public_base = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
-
     client = boto3.client(
         "s3",
         endpoint_url=endpoint,
@@ -77,6 +103,9 @@ def handler(job):
     """Handler principale RunPod Serverless."""
     job_input = job.get("input", {})
     video_url = job_input.get("video_url")
+    model_url = job_input.get("model_url")          # pre-signed GET URL modello
+    result_put_url = job_input.get("result_put_url")  # pre-signed PUT URL risultato
+    result_url_out = job_input.get("result_url")      # URL pubblico risultato (da restituire)
     options = job_input.get("options", {})
 
     if not video_url:
@@ -84,7 +113,7 @@ def handler(job):
 
     # Assicura che il modello sia presente
     try:
-        _ensure_model()
+        _ensure_model(model_url)
     except Exception as e:
         return {"error": f"Download modello fallito: {e}"}
 
@@ -94,7 +123,7 @@ def handler(job):
         # Scarica video in file temporaneo
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
             tmp_video = f.name
-        LOG.info("Downloading video from %s ...", video_url)
+        LOG.info("Downloading video from %s ...", video_url[:80])
         urllib.request.urlretrieve(video_url, tmp_video)
         LOG.info("Video downloaded: %.1f MB", Path(tmp_video).stat().st_size / 1e6)
 
@@ -130,10 +159,15 @@ def handler(job):
         n_balls = sum(1 for d in all_dets if d.get("role") == "ball")
 
         # Carica risultato su R2
-        video_name = Path(video_url).stem
-        result_key = f"results/{video_name}_detections.json"
-        LOG.info("Uploading results to R2 (%d frames)...", n_frames)
-        result_url = _upload_result(tmp_result, result_key)
+        LOG.info("Uploading results (%d frames)...", n_frames)
+        if result_put_url:
+            _upload_result_presigned(tmp_result, result_put_url)
+            result_url = result_url_out or "uploaded"
+        else:
+            # Fallback: boto3 con env vars
+            video_name = Path(video_url.split("?")[0]).stem  # rimuovi query string pre-signed
+            result_key = f"results/{video_name}_detections.json"
+            result_url = _upload_result_boto3(tmp_result, result_key)
         LOG.info("Results uploaded: %s", result_url)
 
         return {
