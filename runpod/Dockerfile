@@ -20,10 +20,8 @@ RUN pip install --no-cache-dir \
 COPY runpod/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Installa YOLOX dalla sorgente ufficiale
-RUN git clone https://github.com/Megvii-BaseDetection/YOLOX.git /tmp/yolox \
-    && pip install --no-cache-dir -e /tmp/yolox \
-    && rm -rf /tmp/yolox/.git
+# Installa YOLOX da PyPI
+RUN pip install --no-cache-dir yolox
 
 # Copia codice dell'app
 COPY analysis/ /app/analysis/
