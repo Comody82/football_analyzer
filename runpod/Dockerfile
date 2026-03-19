@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     wget \
+    build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # PyTorch 2.4.0 con CUDA 12.1 (via pip ufficiale)
@@ -19,6 +21,9 @@ RUN pip install --no-cache-dir \
 # Altre dipendenze
 COPY runpod/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Installa Cython (richiesto da pycocotools che è dipendenza di YOLOX)
+RUN pip install --no-cache-dir Cython
 
 # Installa YOLOX da PyPI
 RUN pip install --no-cache-dir yolox
