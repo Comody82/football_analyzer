@@ -15,12 +15,23 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
 # Solo errori nel terminale (evita spam). Per debug: FOOTBALL_ANALYZER_DEBUG=1 python main_web.py
-_log_level = logging.DEBUG if os.environ.get('FOOTBALL_ANALYZER_DEBUG') else logging.WARNING
+_log_level = logging.DEBUG if os.environ.get('FOOTBALL_ANALYZER_DEBUG') else logging.ERROR
 logging.basicConfig(level=_log_level, format='%(levelname)s: %(message)s')
+# YOLOX: silenzia messaggi INFO ("Infer time" ecc.)
+logging.getLogger("yolox").setLevel(logging.ERROR)
+
+# Precarica PyTorch prima di Qt per evitare WinError 1114 (c10.dll) su Windows
+try:
+    import torch  # noqa: F401
+except ImportError:
+    pass
 
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
+    QDialog,
+    QDialogButtonBox,
+    QAbstractItemView,
     QShortcut,
     QMessageBox,
     QMenu,
@@ -34,23 +45,74 @@ from PyQt5.QtWidgets import (
     QListWidgetItem,
     QCheckBox,
     QLineEdit,
+    QSpinBox,
+    QGroupBox,
     QFileDialog,
     QInputDialog,
     QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QSizePolicy,
     QFrame,
+    QRadioButton,
 )
-from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QThread, QSettings
 from PyQt5.QtGui import QContextMenuEvent, QKeySequence, QColor, QPainter, QLinearGradient, QRadialGradient, QPen, QPixmap
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWebChannel import QWebChannel
 
 from backend import BackendBridge
 from ui.opencv_video_widget import OpenCVVideoWidget
-from ui.video_interaction_overlay import VideoInteractionOverlay
-from ui.drawing_overlay import DrawingOverlay, DrawTool
+from ui.drawing_overlay import DrawTool
+from ui.highlight_image_creator import HighlightImageCreatorDialog
+from ui.highlight_progress_dialog import HighlightProgressDialog
+from ui.field_calibration_dialog import FieldCalibrationDialog
+from ui.video_preprocessing_dialog import VideoPreprocessingDialog
+from ui.player_detection_dialog import get_video_for_detection as get_video_for_player_detection
+from ui.analysis_process_dialog import AnalysisProcessDialog, has_checkpoint
+from ui.cloud_analysis_dialog import CloudAnalysisDialog
+from ui.statistics_dialog import StatisticsDialog
 from project_repository import ProjectRepository
+from ui.hardware_check import run_hardware_check
+
+
+# Modalità workspace: "legacy" (3 WebView). d_migration rimosso (layout identico, stesso codice).
+WORKSPACE_UI_MODE = os.environ.get("FOOTBALL_WORKSPACE_UI", "legacy")
+
+# Preferenze Fase 3: analisi Locale / Cloud (QSettings)
+SETTINGS_ORG = "FootballAnalyzer"
+SETTINGS_APP = "FootballAnalyzer"
+KEY_ANALYSIS_MODE = "analysis_mode"
+KEY_HARDWARE_WARNING_DISMISSED = "hardware_warning_dismissed"
+DEFAULT_ANALYSIS_MODE = "cloud"
+
+# Fase 4: base URL API cloud (env o default locale)
+CLOUD_API_BASE_URL = os.environ.get("FOOTBALL_ANALYZER_API_URL", "http://localhost:8000")
+
+
+class HighlightGenerateWorker(QThread):
+    """Worker per generazione highlights in background."""
+    progress = pyqtSignal(int, str)
+    finished_signal = pyqtSignal(bool, str)
+
+    def __init__(self, backend, sequence, output_path):
+        super().__init__()
+        self._backend = backend
+        self._sequence = sequence
+        self._output_path = output_path
+
+    def run(self):
+        def on_progress(pct, msg):
+            self.progress.emit(pct, msg)
+        ok, result = self._backend.generate_highlights_package_from_sequence(
+            self._sequence, output_path=self._output_path, progress_callback=on_progress
+        )
+        self.finished_signal.emit(ok, result)
+
+
+def _log_workspace_bootstrap(stage: str, extra: str = ""):
+    """Log tecnico per bootstrap workspace (confronto legacy vs d_migration)."""
+    if os.environ.get("FOOTBALL_ANALYZER_DEBUG"):
+        logging.debug("[workspace_bootstrap] %s %s", stage, extra)
 
 
 class CustomWebEngineView(QWebEngineView):
@@ -123,11 +185,13 @@ class WorkspacePage(QWidget):
         QWidget#workspaceTopBar {
             background: qlineargradient(
                 x1:0, y1:0, x2:1, y2:0,
-                stop:0 #0c1324,
-                stop:0.48 #121d33,
-                stop:1 #0a1224
+                stop:0 rgba(10, 16, 28, 0.80),
+                stop:0.5 rgba(24, 34, 52, 0.76),
+                stop:1 rgba(10, 16, 28, 0.80)
             );
             border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.10);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
         }
         QLabel#workspaceBrand {
             color: #e9f2ff;
@@ -164,7 +228,7 @@ class WorkspacePage(QWidget):
                 stop:0.52 #17806a,
                 stop:1 #29b48d
             );
-            color: #eafff8;
+            color: #e8f2ff;
             border: none;
             font-weight: 700;
         }
@@ -181,7 +245,7 @@ class WorkspacePage(QWidget):
             padding-right: 34px;
         }
         QLabel#workspaceSaveCheck {
-            color: rgb(88, 240, 176);
+            color: rgb(120, 180, 255);
             font-size: 14px;
             font-weight: 800;
             background: transparent;
@@ -201,6 +265,7 @@ class WorkspacePage(QWidget):
         self.project_repository = project_repository
         self.setWindowTitle("Football Analyzer - Web Edition")
         self.setObjectName("workspaceRoot")
+        self._ui_mode = WORKSPACE_UI_MODE
         self._video_source_locked = False
         self._loaded_webviews = 0
         self._webviews_ready = {"left": False, "center": False, "right": False}
@@ -209,6 +274,10 @@ class WorkspacePage(QWidget):
         self._ui_boot_locked = True
         self._highlights_mode = False
         self._highlights_image_items = []
+        self._analysis_in_progress = False
+        self._analysis_dialog = None
+        # Fase 3: rilevamento hardware (cache a ogni avvio workspace)
+        self._hardware_check_result = run_hardware_check()
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -233,7 +302,13 @@ class WorkspacePage(QWidget):
 
         btn_stats = QPushButton("Statistiche")
         btn_stats.setProperty("class", "workspaceTopBtn")
+        btn_stats.clicked.connect(self._on_statistics_clicked)
         topbar_layout.addWidget(btn_stats, 0, Qt.AlignVCenter)
+
+        self.btn_export_report = QPushButton("Esporta report")
+        self.btn_export_report.setProperty("class", "workspaceTopBtn")
+        self.btn_export_report.clicked.connect(self._on_export_report_clicked)
+        topbar_layout.addWidget(self.btn_export_report, 0, Qt.AlignVCenter)
 
         self.btn_save_project = QPushButton("Salva Progetto")
         self.btn_save_project.setObjectName("workspaceSaveBtn")
@@ -258,18 +333,34 @@ class WorkspacePage(QWidget):
         topbar_layout.addWidget(btn_dashboard, 0, Qt.AlignVCenter)
         root_layout.addWidget(topbar, 0)
 
-        # Layout principale orizzontale a 3 colonne
+        from PyQt5.QtWebEngineWidgets import QWebEngineSettings
+
         main_layout = QHBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         root_layout.addLayout(main_layout, 1)
 
-        from PyQt5.QtWebEngineWidgets import QWebEngineSettings
+        self._build_ui_legacy(main_layout, QWebEngineSettings)
 
-        # Colonna sinistra: WebView Eventi
+        # Scorciatoie, curtain, etc. (comuni)
+        self._setup_shortcuts()
+        self._dragging_window = False
+        self._drag_offset = None
+        self._position_save_check()
+        self._position_open_video_button()
+        self._update_open_video_cta_visibility()
+        self._setup_startup_curtain()
+        self.setUpdatesEnabled(False)
+        QTimer.singleShot(4500, self._force_reveal_if_stuck)
+
+    def _build_ui_legacy(self, main_layout, QWebEngineSettings):
+        """Layout legacy: 3 WebView (Eventi | Video+Controlli | Clip)."""
+        _log_workspace_bootstrap("build", "legacy")
+        self.web_view_unified = None
+
         self.web_view_left = CustomWebEngineView()
         self.web_view_left.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-        self.web_view_left.page().setBackgroundColor(QColor(0, 0, 0, 0))
+        self.web_view_left.page().setBackgroundColor(QColor(0x0B, 0x13, 0x20))
         self.web_view_left.setStyleSheet("background: transparent; border: none;")
         self.web_view_left.setFixedWidth(300)
         main_layout.addWidget(self.web_view_left, 0)
@@ -291,6 +382,7 @@ class WorkspacePage(QWidget):
         self.video_player = OpenCVVideoWidget()
         self.video_player.setStyleSheet("background-color: #0B1220; border-radius: 12px;")
         center_layout.addWidget(self.video_player, 5)
+        self.drawing_overlay = self.video_player.drawing_overlay
 
         # CTA nell'area video vuota: apre il file video direttamente dal centro.
         self.btn_open_video_overlay = QPushButton("📹 Apri Video", self.video_player)
@@ -338,34 +430,18 @@ class WorkspacePage(QWidget):
         cta_shadow.setColor(QColor(8, 12, 20, 170))
         self.btn_open_video_overlay.setGraphicsEffect(cta_shadow)
         self.btn_open_video_overlay.raise_()
-        
-        # Overlay interazione (click per eventi timeline)
-        self.video_overlay = VideoInteractionOverlay(self.video_player, parent=self.video_player)
-        self.video_overlay.setGeometry(self.video_player.rect())
 
-        # Overlay disegno - SOPRA video_overlay, riceve click per disegni e right-click per menu
-        self.drawing_overlay = DrawingOverlay(self.video_player)
-        self.video_overlay.drawing_overlay = self.drawing_overlay  # Inoltro right-click se ricevuto da video_overlay
-        r = self.video_player.rect()
-        self.drawing_overlay.setGeometry(r)
-        self.drawing_overlay.setSceneRect(0, 0, max(1, r.width()), max(1, r.height()))
-        self.drawing_overlay.raise_()
-        r = self.video_player.rect()
-        self.drawing_overlay.setGeometry(r)
-        self.drawing_overlay.setSceneRect(0, 0, max(1, r.width()), max(1, r.height()))
-
-        # Connect overlay signals
-        self.video_overlay.videoClicked.connect(self._on_video_clicked)
-        self.video_overlay.mousePressed.connect(self._on_mouse_pressed)
-        self.video_overlay.mouseMoved.connect(self._on_mouse_moved)
-        self.video_overlay.mouseReleased.connect(self._on_mouse_released)
-
-        # Connect drawing overlay
+        # Connect drawing overlay (video + disegni in scena unificata)
         self.drawing_overlay.emptyAreaLeftClicked.connect(self._on_empty_area_clicked)
         self.drawing_overlay.drawingConfirmed.connect(self._on_drawing_confirmed)
         self.drawing_overlay.drawingStarted.connect(self._on_drawing_started)
         self.drawing_overlay.annotationDeleted.connect(self._on_annotation_deleted)
         self.drawing_overlay.annotationModified.connect(self._on_annotation_modified)
+        self.drawing_overlay.zoomRequested.connect(self._on_zoom_requested)
+        self._zoom_level = 1.0
+        self._zoom_max = 5.0
+        if hasattr(self.video_player, 'zoomLevelChanged'):
+            self.video_player.zoomLevelChanged.connect(self._on_zoom_level_changed)
 
         # Resize overlays quando video player viene ridimensionato
         self.video_player.resizeEvent = self._video_player_resized
@@ -373,7 +449,7 @@ class WorkspacePage(QWidget):
         # Timeline e controlli sotto il video (WebView dedicata)
         self.web_view_center_controls = CustomWebEngineView()
         self.web_view_center_controls.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-        self.web_view_center_controls.page().setBackgroundColor(QColor(0, 0, 0, 0))
+        self.web_view_center_controls.page().setBackgroundColor(QColor(0x0B, 0x13, 0x20))
         self.web_view_center_controls.setStyleSheet("background: transparent; border: none;")
         center_layout.addWidget(self.web_view_center_controls, 2)
         self._center_stack.addWidget(center_normal_widget)
@@ -387,7 +463,7 @@ class WorkspacePage(QWidget):
         # Colonna destra: WebView Clip/Statistiche
         self.web_view_right = CustomWebEngineView()
         self.web_view_right.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-        self.web_view_right.page().setBackgroundColor(QColor(0, 0, 0, 0))
+        self.web_view_right.page().setBackgroundColor(QColor(0x0B, 0x13, 0x20))
         self.web_view_right.setStyleSheet("background: transparent; border: none;")
         self.web_view_right.setFixedWidth(300)
         main_layout.addWidget(self.web_view_right, 0)
@@ -400,6 +476,7 @@ class WorkspacePage(QWidget):
         # Refresh disegni al cambio posizione e al passaggio play/pausa (es. pausa su evento)
         self.video_player.positionChanged.connect(self._refresh_drawings_visibility)
         self.video_player.playbackStateChanged.connect(self._refresh_drawings_visibility)
+        self.video_player.playbackStateChanged.connect(self._block_play_during_analysis)
         
         # Backend bridge
         self.backend = BackendBridge(
@@ -421,6 +498,7 @@ class WorkspacePage(QWidget):
         self.web_view_right.page().setWebChannel(self.channel)
         self.btn_open_video_overlay.clicked.connect(self._handle_open_video_request)
         self.backend.videoLoaded.connect(lambda _path: self._update_open_video_cta_visibility())
+        self.backend.videoLoaded.connect(lambda _path: self._load_tracking_overlay())
         self.web_view_left.loadFinished.connect(lambda ok: self._on_any_webview_loaded("left", ok))
         self.web_view_center_controls.loadFinished.connect(lambda ok: self._on_any_webview_loaded("center", ok))
         self.web_view_right.loadFinished.connect(lambda ok: self._on_any_webview_loaded("right", ok))
@@ -437,19 +515,6 @@ class WorkspacePage(QWidget):
             logging.info("Loading Web UI (3 columns)")
         else:
             logging.error(f"Frontend not found: {frontend_path}")
-
-        # Scorciatoie da tastiera globali
-        self._setup_shortcuts()
-        self._dragging_window = False
-        self._drag_offset = None
-        self._position_save_check()
-        self._position_open_video_button()
-        self._update_open_video_cta_visibility()
-        self._setup_startup_curtain()
-        # Blocca il repaint iniziale: evita che il video Qt compaia prima delle webview.
-        self.setUpdatesEnabled(False)
-        # Fallback solo di sicurezza: evita reveal anticipato che crea effetto a cascata.
-        QTimer.singleShot(4500, self._force_reveal_if_stuck)
 
     def _on_draw_tool_changed(self, tool):
         """Callback cambio strumento disegno (barra testo ora con tasto destro)."""
@@ -490,14 +555,13 @@ class WorkspacePage(QWidget):
         QMessageBox.information(self, "Scorciatoie da tastiera", msg)
 
     def _video_player_resized(self, event):
-        """Ridimensiona overlay quando video player viene ridimensionato"""
-        r = self.video_player.rect()
-        if hasattr(self, 'video_overlay'):
-            self.video_overlay.setGeometry(r)
+        """Layout ridimensiona drawing_overlay; fitSceneToView da resizeEvent dell'overlay."""
         if hasattr(self, 'drawing_overlay'):
-            self.drawing_overlay.setGeometry(r)
-            self.drawing_overlay.setSceneRect(0, 0, r.width(), r.height())
+            self.drawing_overlay.fitSceneToView()
         self._position_open_video_button()
+        self._position_save_check()
+        self._ensure_video_frame_rendered()
+        OpenCVVideoWidget.resizeEvent(self.video_player, event)
         self._position_save_check()
         self._ensure_video_frame_rendered()
         OpenCVVideoWidget.resizeEvent(self.video_player, event)
@@ -531,6 +595,75 @@ class WorkspacePage(QWidget):
         ok = self.persist_project()
         self._show_save_check_feedback(bool(ok))
 
+    def _on_statistics_clicked(self):
+        """Apre il dialog Statistiche con possesso %, passaggi, tiri, recuperi, pressing e metriche."""
+        project_dir = self._get_project_analysis_dir()
+        if not project_dir:
+            QMessageBox.warning(self.window(), "Statistiche", "Progetto non valido.")
+            return
+        from analysis.config import get_analysis_output_path
+        metrics_path = Path(get_analysis_output_path(project_dir)) / "metrics.json"
+        if not metrics_path.exists():
+            QMessageBox.information(
+                self.window(),
+                "Statistiche",
+                "Esegui prima un'analisi automatica completa per vedere possesso, passaggi e metriche.",
+            )
+            return
+        dlg = StatisticsDialog(project_dir, parent=self.window())
+        dlg.exec_()
+
+    def _get_project_analysis_dir(self):
+        """Restituisce la cartella analysis del progetto corrente o None."""
+        if not hasattr(self, "project_id") or not self.project_id or not hasattr(self, "project_repository"):
+            return None
+        base = getattr(self.project_repository, "base_path", None)
+        if not base:
+            return None
+        return str(Path(base) / "analysis" / str(self.project_id))
+
+    def _on_export_report_clicked(self):
+        """Menu Esporta report: JSON, CSV, PDF (Fase 8)."""
+        project_dir = self._get_project_analysis_dir()
+        if not project_dir:
+            QMessageBox.warning(self.window(), "Esporta report", "Progetto non valido.")
+            return
+        from analysis.report import export_json, export_csv, export_pdf
+        from analysis.config import get_analysis_output_path
+        if not (Path(get_analysis_output_path(project_dir)) / "metrics.json").exists():
+            QMessageBox.information(
+                self.window(),
+                "Esporta report",
+                "Esegui prima un'analisi completa (Analisi automatica) per generare metriche e eventi.",
+            )
+            return
+        menu = QMenu(self.window())
+        act_json = menu.addAction("Esporta come JSON (risultato completo)")
+        act_csv = menu.addAction("Esporta come CSV (tabelle)")
+        act_pdf = menu.addAction("Esporta come PDF (report)")
+        pos = self.btn_export_report.mapToGlobal(self.btn_export_report.rect().bottomLeft()) if hasattr(self, "btn_export_report") else self._topbar.mapToGlobal(self._topbar.rect().bottomRight())
+        act = menu.exec_(pos)
+        if not act:
+            return
+        if act == act_json:
+            path, _ = QFileDialog.getSaveFileName(self.window(), "Esporta JSON", "", "JSON (*.json)")
+            if path:
+                ok = export_json(project_dir, path, source="local", project_id=getattr(self, "project_id", None))
+                QMessageBox.information(self.window(), "Esporta report", "Export completato." if ok else "Export fallito.")
+        elif act == act_csv:
+            path = QFileDialog.getExistingDirectory(self.window(), "Cartella per file CSV")
+            if path:
+                ok = export_csv(project_dir, path, include_events=True)
+                QMessageBox.information(self.window(), "Esporta report", "Export CSV completato." if ok else "Export fallito.")
+        elif act == act_pdf:
+            path, _ = QFileDialog.getSaveFileName(self.window(), "Esporta PDF", "", "PDF (*.pdf)")
+            if path:
+                try:
+                    ok = export_pdf(project_dir, path, source="local", project_id=getattr(self, "project_id", None))
+                    QMessageBox.information(self.window(), "Esporta report", "Export PDF completato." if ok else "Export fallito.")
+                except ImportError as e:
+                    QMessageBox.warning(self.window(), "Esporta report", "Per il PDF installa reportlab: pip install reportlab")
+
     def _handle_open_video_request(self):
         if self._video_source_locked:
             QMessageBox.information(
@@ -543,7 +676,8 @@ class WorkspacePage(QWidget):
         self.backend.openVideo()
 
     def _restore_saved_project_video(self):
-        """Carica il video gia' salvato sul progetto e blocca il cambio sorgente."""
+        """Carica il video gia' salvato sul progetto e blocca il cambio sorgente.
+        Se esiste preprocessato, lo usa per allineare display e dati di tracking."""
         saved_path = str(getattr(self.backend.project, "video_path", "") or "").strip()
         if not saved_path:
             self._video_source_locked = False
@@ -553,12 +687,84 @@ class WorkspacePage(QWidget):
             logging.warning("Video salvato non trovato: %s", saved_path)
             self._video_source_locked = False
             return
-        self.video_player.load(str(p))
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(Path(base) / "analysis" / str(self.project_id))
+        video_to_load = str(p)
+        if project_dir:
+            from analysis.video_preprocessing import get_preprocessed_path
+            preprocessed = get_preprocessed_path(project_dir)
+            if Path(preprocessed).exists():
+                video_to_load = str(preprocessed)
+        self.video_player.load(video_to_load)
         self.backend.project.video_path = str(p)
         self.backend.videoLoaded.emit(str(p))
         self._video_source_locked = True
+        self._load_tracking_overlay()
         QTimer.singleShot(0, self._ensure_video_frame_rendered)
         QTimer.singleShot(180, self._ensure_video_frame_rendered)
+
+    def load_analysis_result(self, project_dir=None, result_payload=None):
+        """
+        Caricamento risultati unificato (Fase 3.6): accetta sia percorso locale (cartella progetto)
+        sia payload da API (GET /v1/jobs/{id}/result). Stesso schema → stessa UI (timeline, overlay).
+        """
+        if not getattr(self, "video_player", None):
+            return
+        ball_tracks = None
+        player_tracks = None
+        if result_payload is not None:
+            try:
+                tracking = result_payload.get("tracking") or {}
+                player_tracks = tracking.get("player_tracks")
+                ball_tracks = tracking.get("ball_tracks")
+                events = result_payload.get("events") or {}
+                automatic = events.get("automatic", [])
+                if automatic and getattr(self, "backend", None):
+                    self.backend.setAutomaticEvents(json.dumps(automatic))
+            except Exception as e:
+                logging.warning("Caricamento risultato da payload fallito: %s", e)
+            self.video_player.setTrackingOverlay(ball_tracks, player_tracks)
+            return
+        if project_dir:
+            try:
+                from analysis.ball_tracking import get_ball_tracks_path
+                from analysis.player_tracking import get_tracks_path
+                from analysis.config import get_analysis_output_path
+                ball_path = Path(get_ball_tracks_path(project_dir)).resolve()
+                pt_path = Path(get_tracks_path(project_dir)).resolve()
+                if ball_path.exists():
+                    with open(ball_path, "r", encoding="utf-8") as f:
+                        ball_tracks = json.load(f)
+                if pt_path.exists():
+                    with open(pt_path, "r", encoding="utf-8") as f:
+                        player_tracks = json.load(f)
+                # Fase 8: carica eventi automatici (event engine) per timeline
+                if getattr(self, "backend", None):
+                    events_engine_path = Path(get_analysis_output_path(project_dir)) / "detections" / "events_engine.json"
+                    if events_engine_path.exists():
+                        with open(events_engine_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        self.backend.setAutomaticEvents(json.dumps(data.get("automatic", [])))
+                    else:
+                        self.backend.setAutomaticEvents("[]")
+            except Exception as e:
+                logging.warning("Caricamento tracking da progetto fallito: %s", e)
+            self.video_player.setTrackingOverlay(ball_tracks, player_tracks)
+            return
+        self.video_player.setTrackingOverlay(None, None)
+
+    def _load_tracking_overlay(self):
+        """Carica ball_tracks e player_tracks dal progetto e li passa al video widget (usa percorso unificato)."""
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(Path(base) / "analysis" / str(self.project_id))
+                project_dir = str(Path(project_dir).resolve())
+        self.load_analysis_result(project_dir=project_dir)
 
     def _ensure_video_frame_rendered(self):
         """Forza il render del frame corrente quando il widget acquisisce dimensione."""
@@ -570,6 +776,7 @@ class WorkspacePage(QWidget):
             return
         pos = max(0, self.video_player.position())
         self.video_player.setPosition(pos)
+        _log_workspace_bootstrap("video_render_ready", "")
 
     def _position_open_video_button(self):
         if not hasattr(self, "btn_open_video_overlay"):
@@ -633,9 +840,9 @@ class WorkspacePage(QWidget):
             QPushButton#hlGenerateBtn {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #0f5d4d,
-                    stop:0.52 #17806a,
-                    stop:1 #29b48d
+                    stop:0 #2d4a6a,
+                    stop:0.52 #3d5f8a,
+                    stop:1 #5a82b5
                 );
                 border: none;
                 color: #eafff8;
@@ -649,6 +856,29 @@ class WorkspacePage(QWidget):
                     stop:1 #33c89f
                 );
             }
+            QGroupBox#hlMatchGroup {
+                font-size: 12px;
+                font-weight: 600;
+                color: #b8cde8;
+                border: 1px solid rgba(120, 156, 206, 0.4);
+                border-radius: 8px;
+                margin-top: 8px;
+                padding: 10px 12px 6px 12px;
+            }
+            QGroupBox#hlMatchGroup::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 6px;
+                color: #c8daf0;
+            }
+            QSpinBox {
+                min-width: 48px;
+                background: rgba(20, 30, 50, 0.8);
+                color: #e8f0fa;
+                border: 1px solid rgba(120, 156, 206, 0.35);
+                border-radius: 6px;
+                padding: 4px 8px;
+            }
         """)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(18, 14, 18, 14)
@@ -656,10 +886,47 @@ class WorkspacePage(QWidget):
 
         title = QLabel("Studio Highlights")
         title.setObjectName("hlTitle")
-        subtitle = QLabel("Seleziona clip e immagini da includere nel video finale.")
+        subtitle = QLabel("Seleziona clip, ordina la sequenza e inserisci immagini dove vuoi.")
         subtitle.setObjectName("hlSubtitle")
         layout.addWidget(title)
         layout.addWidget(subtitle)
+
+        # Dati partita (per pre-compilare Crea Immagine)
+        match_group = QGroupBox("Dati partita")
+        match_group.setObjectName("hlMatchGroup")
+        match_layout = QHBoxLayout(match_group)
+        match_layout.addWidget(QLabel("Squadra casa:"))
+        self._edit_team_home = QLineEdit()
+        self._edit_team_home.setPlaceholderText("es. Milan")
+        self._edit_team_home.setMaximumWidth(140)
+        self._edit_team_home.editingFinished.connect(self._save_match_metadata)
+        match_layout.addWidget(self._edit_team_home)
+        match_layout.addWidget(QLabel("Squadra ospiti:"))
+        self._edit_team_away = QLineEdit()
+        self._edit_team_away.setPlaceholderText("es. Inter")
+        self._edit_team_away.setMaximumWidth(140)
+        self._edit_team_away.editingFinished.connect(self._save_match_metadata)
+        match_layout.addWidget(self._edit_team_away)
+        match_layout.addWidget(QLabel("Punteggio:"))
+        self._spin_score_home = QSpinBox()
+        self._spin_score_home.setRange(0, 99)
+        self._spin_score_home.setValue(0)
+        self._spin_score_home.valueChanged.connect(self._save_match_metadata)
+        match_layout.addWidget(self._spin_score_home)
+        match_layout.addWidget(QLabel("-"))
+        self._spin_score_away = QSpinBox()
+        self._spin_score_away.setRange(0, 99)
+        self._spin_score_away.setValue(0)
+        self._spin_score_away.valueChanged.connect(self._save_match_metadata)
+        match_layout.addWidget(self._spin_score_away)
+        match_layout.addWidget(QLabel("Data:"))
+        self._edit_match_date = QLineEdit()
+        self._edit_match_date.setPlaceholderText("es. 15 Gen 2025")
+        self._edit_match_date.setMaximumWidth(120)
+        self._edit_match_date.editingFinished.connect(self._save_match_metadata)
+        match_layout.addWidget(self._edit_match_date)
+        match_layout.addStretch(1)
+        layout.addWidget(match_group)
 
         self.chk_hl_all = QCheckBox("Includi tutte le clip")
         self.chk_hl_all.setChecked(True)
@@ -667,21 +934,30 @@ class WorkspacePage(QWidget):
         layout.addWidget(self.chk_hl_all)
 
         self.list_hl_clips = QListWidget()
-        layout.addWidget(self.list_hl_clips, 2)
+        layout.addWidget(self.list_hl_clips, 1)
 
-        img_row = QHBoxLayout()
-        img_label = QLabel("Immagini da inserire (append):")
-        img_row.addWidget(img_label, 1)
+        seq_label = QLabel("Sequenza finale (trascina per riordinare):")
+        layout.addWidget(seq_label)
+        self.list_hl_sequence = QListWidget()
+        self.list_hl_sequence.setDragDropMode(QAbstractItemView.InternalMove)
+        self.list_hl_sequence.setDefaultDropAction(Qt.MoveAction)
+        self.list_hl_sequence.itemDoubleClicked.connect(self._on_hl_sequence_item_double_clicked)
+        layout.addWidget(self.list_hl_sequence, 2)
+
+        seq_row = QHBoxLayout()
         btn_add_img = QPushButton("+ Aggiungi immagine")
         btn_add_img.clicked.connect(self._add_highlight_image)
-        btn_remove_img = QPushButton("Rimuovi selezionata")
-        btn_remove_img.clicked.connect(self._remove_highlight_image)
-        img_row.addWidget(btn_add_img, 0)
-        img_row.addWidget(btn_remove_img, 0)
-        layout.addLayout(img_row)
-
-        self.list_hl_images = QListWidget()
-        layout.addWidget(self.list_hl_images, 1)
+        btn_create_img = QPushButton("Crea Immagine")
+        btn_create_img.clicked.connect(self._create_highlight_image)
+        btn_add_clips = QPushButton("Aggiungi clip selezionate")
+        btn_add_clips.clicked.connect(self._add_selected_clips_to_sequence)
+        btn_remove_seq = QPushButton("Rimuovi selezionato")
+        btn_remove_seq.clicked.connect(self._remove_from_sequence)
+        seq_row.addWidget(btn_add_clips)
+        seq_row.addWidget(btn_add_img)
+        seq_row.addWidget(btn_create_img)
+        seq_row.addWidget(btn_remove_seq)
+        layout.addLayout(seq_row)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
@@ -694,6 +970,27 @@ class WorkspacePage(QWidget):
         actions.addWidget(btn_generate, 0)
         layout.addLayout(actions)
         return panel
+
+    def _save_match_metadata(self):
+        """Salva i dati partita nel progetto."""
+        md = getattr(self.backend.project, "match_metadata", None)
+        if md is None:
+            self.backend.project.match_metadata = {}
+            md = self.backend.project.match_metadata
+        md["team_home"] = (self._edit_team_home.text() or "").strip()
+        md["team_away"] = (self._edit_team_away.text() or "").strip()
+        md["score_home"] = self._spin_score_home.value()
+        md["score_away"] = self._spin_score_away.value()
+        md["match_date"] = (self._edit_match_date.text() or "").strip()
+
+    def _refresh_match_metadata_fields(self):
+        """Carica i dati partita dal progetto nei campi."""
+        md = getattr(self.backend.project, "match_metadata", None) or {}
+        self._edit_team_home.setText(str(md.get("team_home", "")))
+        self._edit_team_away.setText(str(md.get("team_away", "")))
+        self._spin_score_home.setValue(int(md.get("score_home", 0)))
+        self._spin_score_away.setValue(int(md.get("score_away", 0)))
+        self._edit_match_date.setText(str(md.get("match_date", "")))
 
     def _refresh_highlights_clip_list(self):
         if not hasattr(self, "list_hl_clips"):
@@ -715,6 +1012,64 @@ class WorkspacePage(QWidget):
         if hasattr(self, "list_hl_clips"):
             self.list_hl_clips.setEnabled(enable_checks)
 
+    def _ask_insert_position(self, label_default="Alla fine") -> int:
+        """Chiede dove inserire. Ritorna indice (0=inizio, n=posizione)."""
+        n = self.list_hl_sequence.count()
+        if n == 0:
+            return 0
+        opts = ["All'inizio"] + [f"Dopo elemento {i + 1}" for i in range(n)] + ["Alla fine"]
+        choice, ok = QInputDialog.getItem(
+            self, "Dove inserire?", "Posizione:", opts, n + 1, False
+        )
+        if not ok:
+            return -1
+        idx = opts.index(choice)
+        return idx
+
+    def _hl_insert_item(self, seq_item: dict, index: int):
+        """Inserisce un item (clip o image) nella sequenza alla posizione index."""
+        if seq_item.get("type") == "clip":
+            clip = next((c for c in self.backend.clips if c.get("id") == seq_item.get("clip_id")), None)
+            label = (clip or {}).get("name", "Clip")
+            start = int((clip or {}).get("start", 0))
+            end = int((clip or {}).get("end", 0))
+            txt = f"Clip: {label}   ({start//1000}s - {end//1000}s)"
+        else:
+            path = seq_item.get("path", "")
+            dur = seq_item.get("duration_sec", 3)
+            txt = f"Img: {Path(path).name}   ({dur}s)"
+        item = QListWidgetItem(txt)
+        item.setData(Qt.UserRole, seq_item)
+        if index < 0 or index >= self.list_hl_sequence.count():
+            self.list_hl_sequence.addItem(item)
+        else:
+            self.list_hl_sequence.insertItem(index, item)
+
+    def _add_selected_clips_to_sequence(self):
+        clip_ids = self._selected_highlight_clip_ids()
+        if not clip_ids:
+            QMessageBox.information(self, "Sequenza", "Nessuna clip selezionata.")
+            return
+        idx = self._ask_insert_position()
+        if idx < 0:
+            return
+        for cid in clip_ids:
+            self._hl_insert_item({"type": "clip", "clip_id": cid}, idx)
+            idx += 1
+
+    def _create_highlight_image(self):
+        match_metadata = getattr(self.backend.project, "match_metadata", None) or {}
+        dlg = HighlightImageCreatorDialog(self, match_metadata=match_metadata)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        path = getattr(dlg, "_image_path", None)
+        duration = getattr(dlg, "_duration_sec", 3)
+        if path:
+            seq_item = {"type": "image", "path": path, "duration_sec": duration}
+            idx = self._ask_insert_position()
+            if idx >= 0:
+                self._hl_insert_item(seq_item, idx)
+
     def _add_highlight_image(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -734,21 +1089,48 @@ class WorkspacePage(QWidget):
         )
         if not ok:
             return
-        rec = {"path": path, "duration_sec": int(seconds)}
-        self._highlights_image_items.append(rec)
-        self.list_hl_images.addItem(f"{Path(path).name}  -  {seconds}s")
+        seq_item = {"type": "image", "path": path, "duration_sec": int(seconds)}
+        idx = self._ask_insert_position()
+        if idx >= 0:
+            self._hl_insert_item(seq_item, idx)
 
-    def _remove_highlight_image(self):
-        if not hasattr(self, "list_hl_images"):
+    def _on_hl_sequence_item_double_clicked(self, item):
+        """Alla doppia pressione su un'immagine nella sequenza, mostra anteprima."""
+        data = item.data(Qt.UserRole) if item else None
+        if not isinstance(data, dict) or data.get("type") != "image":
             return
-        row = self.list_hl_images.currentRow()
+        path = data.get("path", "")
+        if not path or not Path(path).exists():
+            QMessageBox.warning(self, "Anteprima", "File immagine non trovato.")
+            return
+        pix = QPixmap(path)
+        if pix.isNull():
+            QMessageBox.warning(self, "Anteprima", "Impossibile caricare l'immagine.")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(Path(path).name)
+        layout = QVBoxLayout(dlg)
+        label = QLabel()
+        label.setAlignment(Qt.AlignCenter)
+        label.setMinimumSize(400, 300)
+        scaled = pix.scaled(960, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        label.setPixmap(scaled)
+        layout.addWidget(label)
+        close_btn = QPushButton("Chiudi")
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+        dlg.exec_()
+
+    def _remove_from_sequence(self):
+        if not hasattr(self, "list_hl_sequence"):
+            return
+        row = self.list_hl_sequence.currentRow()
         if row < 0:
             return
-        self.list_hl_images.takeItem(row)
-        if 0 <= row < len(self._highlights_image_items):
-            self._highlights_image_items.pop(row)
+        self.list_hl_sequence.takeItem(row)
 
     def _selected_highlight_clip_ids(self):
+        """Ritorna lista ID clip selezionate (checkbox)."""
         if self.chk_hl_all.isChecked():
             return [c.get("id") for c in self.backend.clips if c.get("id")]
         selected = []
@@ -760,9 +1142,56 @@ class WorkspacePage(QWidget):
                     selected.append(cid)
         return selected
 
+    def _hl_sequence_to_backend_format(self):
+        """Costruisce la sequenza ordinata per il backend."""
+        seq = []
+        for i in range(self.list_hl_sequence.count()):
+            item = self.list_hl_sequence.item(i)
+            if item:
+                data = item.data(Qt.UserRole)
+                if isinstance(data, dict):
+                    seq.append(data)
+        return seq
+
     def _generate_highlights_from_studio(self):
-        clip_ids = self._selected_highlight_clip_ids()
-        ok, result = self.backend.generate_highlights_package(clip_ids, self._highlights_image_items)
+        sequence = self._hl_sequence_to_backend_format()
+        if not sequence:
+            QMessageBox.warning(self, "Genera Highlights", "La sequenza è vuota. Aggiungi clip o immagini.")
+            return
+        default_name = f"highlights_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Salva Highlights",
+            str(Path.home() / "Videos" / default_name),
+            "Video MP4 (*.mp4);;Tutti i file (*.*)"
+        )
+        if not save_path:
+            return
+        if not save_path.lower().endswith(".mp4"):
+            save_path += ".mp4"
+
+        self._hl_progress_dlg = HighlightProgressDialog(self)
+        self._hl_progress_dlg.set_progress(0, "Avvio...")
+        self._hl_progress_dlg.setModal(True)
+        self._hl_progress_dlg.show()
+        self._hl_progress_dlg.raise_()
+
+        self._hl_worker = HighlightGenerateWorker(self.backend, sequence, save_path)
+        self._hl_worker.progress.connect(self._on_hl_progress)
+        self._hl_worker.finished_signal.connect(self._on_hl_finished)
+        self._hl_worker.start()
+
+    def _on_hl_progress(self, percent: int, status: str):
+        if hasattr(self, "_hl_progress_dlg") and self._hl_progress_dlg:
+            self._hl_progress_dlg.set_progress(percent, status)
+
+    def _on_hl_finished(self, ok: bool, result: str):
+        if hasattr(self, "_hl_progress_dlg") and self._hl_progress_dlg:
+            self._hl_progress_dlg.close()
+            self._hl_progress_dlg = None
+        if hasattr(self, "_hl_worker") and self._hl_worker:
+            self._hl_worker.deleteLater()
+            self._hl_worker = None
         if not ok:
             QMessageBox.warning(self, "Genera Highlights", result)
             return
@@ -770,13 +1199,15 @@ class WorkspacePage(QWidget):
 
     def show_highlights_studio(self):
         self._highlights_mode = True
+        self._refresh_match_metadata_fields()
         self.web_view_left.setVisible(False)
         self._center_widget.setVisible(True)
         self._center_stack.setCurrentWidget(self._highlights_studio_panel)
-        self._highlights_image_items = []
-        if hasattr(self, "list_hl_images"):
-            self.list_hl_images.clear()
+        if hasattr(self, "list_hl_sequence"):
+            self.list_hl_sequence.clear()
         self._refresh_highlights_clip_list()
+        for cid in self._selected_highlight_clip_ids():
+            self._hl_insert_item({"type": "clip", "clip_id": cid}, self.list_hl_sequence.count())
         self._update_open_video_cta_visibility()
 
     def hide_highlights_studio(self):
@@ -784,6 +1215,356 @@ class WorkspacePage(QWidget):
         self._center_stack.setCurrentWidget(self._center_normal_widget)
         self.web_view_left.setVisible(True)
         self._update_open_video_cta_visibility()
+
+    def show_field_calibration(self):
+        """Apre il dialog di calibrazione campo (per analisi automatica)."""
+        if not getattr(self, "video_player", None):
+            QMessageBox.warning(self, "Calibrazione", "Apri prima un video.")
+            return
+        qimg = self.video_player.getCurrentFrameAsQImage()
+        if qimg is None or qimg.isNull():
+            QMessageBox.warning(self, "Calibrazione", "Impossibile acquisire il frame corrente.")
+            return
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(base / "analysis" / str(self.project_id))
+        dlg = FieldCalibrationDialog(qimg, project_dir=project_dir, parent=self.window())
+        from analysis.homography import clear_calibrator_cache
+        dlg.calibrationSaved.connect(clear_calibrator_cache)
+        dlg.exec_()
+
+    def show_video_preprocessing(self):
+        """Apre il dialog di preprocessing video (per analisi automatica)."""
+        video_path = str(getattr(self.backend.project, "video_path", "") or "").strip()
+        if not video_path or not os.path.isfile(video_path):
+            QMessageBox.warning(self, "Preprocessing", "Apri prima un video valido.")
+            return
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(base / "analysis" / str(self.project_id))
+        if not project_dir:
+            QMessageBox.warning(self, "Preprocessing", "Progetto non valido.")
+            return
+        dlg = VideoPreprocessingDialog(video_path, project_dir, parent=self.window())
+        dlg.start()
+        dlg.exec_()
+
+    def _launch_analysis_dialog(self, mode: str, title: str):
+        """Helper: validazione, eventuale prompt ripresa, avvio dialog analisi."""
+        video_path = str(getattr(self.backend.project, "video_path", "") or "").strip()
+        if not video_path or not os.path.isfile(video_path):
+            QMessageBox.warning(self, title, "Apri prima un video valido.")
+            return
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(base / "analysis" / str(self.project_id))
+        if not project_dir:
+            QMessageBox.warning(self, title, "Progetto non valido.")
+            return
+        resume = False
+        if has_checkpoint(project_dir, mode):
+            mb = QMessageBox(self)
+            mb.setWindowTitle("Analisi interrotta")
+            mb.setIcon(QMessageBox.Question)
+            mb.setText("Analisi interrotta. Riprendere dall'ultimo punto salvato?")
+            btn_riprendi = mb.addButton("Riprendi", QMessageBox.AcceptRole)
+            btn_ricomincia = mb.addButton("Ricomincia da capo", QMessageBox.ResetRole)
+            btn_annulla = mb.addButton("Annulla", QMessageBox.RejectRole)
+            mb.setDefaultButton(btn_riprendi)
+            mb.exec_()
+            if mb.clickedButton() == btn_annulla:
+                return
+            if mb.clickedButton() == btn_riprendi:
+                resume = True
+        run_preprocess = (mode == "full" and getattr(self, "_run_preprocess_choice", False))
+        input_video = get_video_for_player_detection(project_dir, video_path)
+        if getattr(self, "video_player", None) and self.video_player.duration() > 0:
+            self.video_player.pause()
+        self._analysis_in_progress = True
+        self._analysis_dialog = None
+        offer_cloud = mode == "full"
+        dlg = AnalysisProcessDialog(
+            input_video, project_dir, mode, parent=self.window(),
+            resume=resume, run_preprocess=run_preprocess,
+            offer_cloud_fallback=offer_cloud,
+        )
+        self._analysis_dialog = dlg
+        dlg.finished_ok.connect(self._load_tracking_overlay)
+        dlg.finished.connect(self._on_analysis_dialog_closed)
+        if offer_cloud:
+            dlg.failed_with_error.connect(self._on_local_analysis_failed_offer_cloud)
+        dlg.start()
+        dlg.show()
+
+    def show_player_detection(self):
+        """Apre il dialog di analisi giocatori (processo separato)."""
+        self._launch_analysis_dialog("player", "Player detection")
+
+    def show_player_tracking(self):
+        """Apre il dialog di analisi giocatori (processo separato, detection+tracking)."""
+        self._launch_analysis_dialog("player", "Player tracking")
+
+    def show_ball_detection(self):
+        """Apre il dialog di analisi palla (processo separato)."""
+        self._launch_analysis_dialog("ball", "Ball detection")
+
+    def _get_analysis_mode(self):
+        """Preferenza salvata: 'local' | 'cloud'. Default cloud."""
+        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        return str(s.value(KEY_ANALYSIS_MODE, DEFAULT_ANALYSIS_MODE, type=str))
+
+    def _set_analysis_mode(self, mode: str):
+        """Salva preferenza analisi (local | cloud)."""
+        if mode not in ("local", "cloud"):
+            return
+        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        s.setValue(KEY_ANALYSIS_MODE, mode)
+
+    def _get_hardware_warning_dismissed(self):
+        """True se l'utente ha scelto 'Non mostrare di nuovo' per l'avviso hardware."""
+        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        return s.value(KEY_HARDWARE_WARNING_DISMISSED, False, type=bool)
+
+    def _set_hardware_warning_dismissed(self, dismissed: bool):
+        s = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        s.setValue(KEY_HARDWARE_WARNING_DISMISSED, dismissed)
+
+    def show_full_analysis(self):
+        """Apre dialog opzioni e avvia analisi automatica completa (preprocess + player + ball + clustering squadre). Un solo pulsante: Locale → pipeline locale, Cloud → upload + API (stub Fase 4)."""
+        video_path = str(getattr(self.backend.project, "video_path", "") or "").strip()
+        if not video_path or not os.path.isfile(video_path):
+            QMessageBox.warning(self, "Analisi automatica", "Apri prima un video valido.")
+            return
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(base / "analysis" / str(self.project_id))
+        if not project_dir:
+            QMessageBox.warning(self, "Analisi automatica", "Progetto non valido.")
+            return
+        from analysis.video_preprocessing import get_preprocessed_path
+        preprocessed_exists = get_preprocessed_path(project_dir).exists()
+        current_mode = self._get_analysis_mode()
+
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle("Analisi automatica")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(
+            "Esegue in sequenza: Preprocesso video (opzionale), Player detection, Player tracking,\n"
+            "Ball detection, Ball tracking, Clustering globale squadre."
+        ))
+        tip = QLabel("Suggerimento: per risultati migliori calibra il campo (Analisi step-by-step) e usa video 720p+.")
+        tip.setStyleSheet("color: #888; font-size: 11px;")
+        tip.setWordWrap(True)
+        layout.addWidget(tip)
+
+        grp_mode = QGroupBox("Modalità analisi")
+        grp_layout = QVBoxLayout(grp_mode)
+        rb_local = QRadioButton("Locale (analisi sul tuo PC)")
+        rb_cloud = QRadioButton("Cloud (analisi sui nostri server)")
+        if current_mode == "local":
+            rb_local.setChecked(True)
+        else:
+            rb_cloud.setChecked(True)
+        grp_layout.addWidget(rb_local)
+        grp_layout.addWidget(rb_cloud)
+        cloud_msg = QLabel("L'analisi verrà eseguita sui nostri server. Per analisi offline scegli \"Locale\".")
+        cloud_msg.setStyleSheet("color: #888; font-size: 11px;")
+        cloud_msg.setWordWrap(True)
+        grp_layout.addWidget(cloud_msg)
+        layout.addWidget(grp_mode)
+
+        chk = QCheckBox("Preprocessa video (720p) se non già presente")
+        chk.setChecked(not preprocessed_exists)
+        chk.setToolTip("Consigliato se il video è in risoluzione maggiore di 720p. (Solo per analisi locale.)")
+        layout.addWidget(chk)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        layout.addWidget(bb)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        use_local = rb_local.isChecked()
+        self._run_preprocess_choice = chk.isChecked()
+
+        if use_local:
+            self._set_analysis_mode("local")
+            hw = self._hardware_check_result
+            if not hw["hardware_ok"] and not self._get_hardware_warning_dismissed():
+                msg = QMessageBox(self.window())
+                msg.setWindowTitle("Risorse limitate")
+                msg.setText(
+                    "Il tuo PC potrebbe non essere adatto per l'analisi locale (nessuna GPU / risorse limitate). "
+                    "L'analisi potrebbe essere molto lenta. Consigliamo l'analisi in cloud."
+                )
+                btn_local_anyway = msg.addButton("Usa comunque locale", QMessageBox.AcceptRole)
+                btn_switch_cloud = msg.addButton("Passa a Cloud", QMessageBox.RejectRole)
+                chk_dismiss = QCheckBox("Non mostrare di nuovo")
+                msg.setCheckBox(chk_dismiss)
+                msg.exec_()
+                if msg.clickedButton() == btn_switch_cloud:
+                    self._set_analysis_mode("cloud")
+                    if chk_dismiss.isChecked():
+                        self._set_hardware_warning_dismissed(True)
+                    self._start_cloud_analysis()
+                    return
+                if chk_dismiss.isChecked():
+                    self._set_hardware_warning_dismissed(True)
+            self._launch_analysis_dialog("full", "Analisi automatica")
+        else:
+            self._set_analysis_mode("cloud")
+            self._start_cloud_analysis()
+
+    def _start_cloud_analysis(self):
+        """Avvio analisi in cloud: upload R2 → RunPod Serverless → download risultati."""
+        video_path = str(getattr(self.backend.project, "video_path", "") or "").strip()
+        if not video_path or not os.path.isfile(video_path):
+            QMessageBox.warning(self.window(), "Analisi in cloud", "Apri prima un video valido.")
+            return
+        options = {
+            "conf_thresh": 0.3,
+            "target_fps": 5.0,
+        }
+        dlg = CloudAnalysisDialog(video_path, options, parent=self.window())
+        dlg.finished_ok.connect(self._on_cloud_result_ready)
+        dlg.failed.connect(self._on_cloud_job_failed)
+        dlg.error.connect(self._on_cloud_error)
+        dlg.finished.connect(self._on_cloud_dialog_finished)
+        self._analysis_in_progress = True
+        dlg.start()
+        dlg.exec_()
+        self._analysis_in_progress = False
+
+    def _on_cloud_result_ready(self, payload: dict):
+        """Risultato analisi cloud pronto: carica in UI unificata."""
+        self.load_analysis_result(result_payload=payload)
+        QMessageBox.information(
+            self.window(),
+            "Analisi in cloud",
+            "Analisi completata. I risultati sono stati caricati.",
+        )
+
+    def _on_cloud_job_failed(self, job_id: str, message: str):
+        QMessageBox.warning(
+            self.window(),
+            "Analisi in cloud",
+            f"Analisi fallita.\n\n{message}",
+        )
+
+    def _on_cloud_error(self, message: str):
+        QMessageBox.warning(
+            self.window(),
+            "Analisi in cloud",
+            f"Impossibile avviare l'analisi in cloud.\n\n{message}\n\n"
+            "Verifica che il server sia raggiungibile (es. FOOTBALL_ANALYZER_API_URL) e riprova.",
+        )
+
+    def _on_cloud_dialog_finished(self):
+        self._analysis_in_progress = False
+
+    def _on_local_analysis_failed_offer_cloud(self, err_msg: str):
+        """Dopo fallimento analisi locale (full): mostra errore e propone passaggio a Cloud."""
+        msg = QMessageBox(self.window())
+        msg.setWindowTitle("Analisi locale non riuscita")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(
+            "L'analisi locale non è riuscita (es. GPU o modelli non disponibili).\n\n"
+            "Dettaglio: " + (err_msg[:400] + "…" if len(err_msg) > 400 else err_msg)
+        )
+        msg.setInformativeText("Vuoi usare l'analisi in cloud?")
+        btn_cloud = msg.addButton("Sì, passa a Cloud", QMessageBox.YesRole)
+        msg.addButton("No", QMessageBox.NoRole)
+        msg.setDefaultButton(btn_cloud)
+        msg.exec_()
+        if msg.clickedButton() == btn_cloud:
+            self._set_analysis_mode("cloud")
+            self._start_cloud_analysis()
+
+    def show_recluster_teams(self):
+        """Esegue solo il clustering globale squadre su player_tracks già presenti."""
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(base / "analysis" / str(self.project_id))
+        if not project_dir:
+            QMessageBox.warning(self, "Ricalcola squadre", "Progetto non valido.")
+            return
+        from analysis.player_tracking import get_tracks_path
+        if not get_tracks_path(project_dir).exists():
+            QMessageBox.warning(
+                self, "Ricalcola squadre",
+                "Nessun file player_tracks.json trovato.\nEsegui prima Player detection e Player tracking.",
+            )
+            return
+        from PyQt5.QtWidgets import QProgressDialog
+        progress = QProgressDialog("Ricalcolo squadre (clustering globale)...", None, 0, 0, self.window())
+        progress.setWindowTitle("Ricalcola squadre")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.processEvents()
+        try:
+            from analysis.global_team_clustering import run_global_team_clustering
+            ok = run_global_team_clustering(project_dir)
+        finally:
+            progress.close()
+        if ok:
+            self._load_tracking_overlay()
+            QMessageBox.information(self, "Ricalcola squadre", "Clustering completato. Overlay aggiornato.")
+        else:
+            QMessageBox.warning(self, "Ricalcola squadre", "Impossibile aggiornare i dati.")
+
+    def _on_analysis_dialog_closed(self):
+        self._analysis_in_progress = False
+        self._analysis_dialog = None
+
+    def get_analysis_process(self):
+        """Ritorna il processo analysis in corso, o None."""
+        dlg = getattr(self, "_analysis_dialog", None)
+        if dlg and getattr(dlg, "_process", None) and dlg._process.poll() is None:
+            return dlg._process
+        return None
+
+    def terminate_analysis_and_close_dialog(self):
+        """Termina il processo di analisi e chiude il dialog."""
+        dlg = getattr(self, "_analysis_dialog", None)
+        if dlg:
+            if getattr(dlg, "_process", None) and dlg._process.poll() is None:
+                dlg._process.terminate()
+            dlg.close()
+        self._analysis_in_progress = False
+        self._analysis_dialog = None
+
+    def save_background_analysis_flag(self):
+        """Salva flag per messaggio 'Analisi completata in background' al riavvio."""
+        project_dir = None
+        if hasattr(self, "project_id") and self.project_id:
+            base = getattr(self.project_repository, "base_path", None)
+            if base:
+                project_dir = str(base / "analysis" / str(self.project_id))
+        if not project_dir:
+            return
+        try:
+            flag_path = self.project_repository.base_path / "pending_background_analysis.json"
+            with open(flag_path, "w", encoding="utf-8") as f:
+                json.dump({"project_analysis_dir": project_dir}, f)
+        except Exception:
+            pass
+
+    def _block_play_during_analysis(self, playing: bool):
+        """Durante analisi, impedisce play per evitare rallentamenti."""
+        if playing and getattr(self, "_analysis_in_progress", False):
+            if getattr(self, "video_player", None):
+                self.video_player.pause()
 
     def _on_any_webview_loaded(self, area: str, ok: bool):
         """Quando una webview è caricata, spinge i dati iniziali."""
@@ -798,17 +1579,23 @@ class WorkspacePage(QWidget):
             QTimer.singleShot(220, self._ensure_video_frame_rendered)
 
     def _on_frontend_ready(self, area: str):
-        """Riceve ACK dal frontend quando una colonna ha completato bootstrap/render."""
-        if area not in self._frontend_ready:
+        """Riceve ACK dal frontend (legacy: left/center/right; d_migration: unified)."""
+        if area == "unified":
+            for k in self._frontend_ready:
+                self._frontend_ready[k] = True
+        elif area in self._frontend_ready:
+            self._frontend_ready[area] = True
+        else:
             return
-        self._frontend_ready[area] = True
         if all(self._frontend_ready.values()):
+            _log_workspace_bootstrap("web_ready", f"mode={getattr(self, '_ui_mode', 'legacy')}")
             self._reveal_workspace_columns()
 
     def _reveal_workspace_columns(self):
-        """Mostra le 3 colonne insieme per un'apertura visivamente uniforme."""
+        """Mostra colonne per apertura uniforme (3 WebView + video in layout)."""
         if self._initial_ui_revealed:
             return
+        _log_workspace_bootstrap("ui_reveal", f"mode={getattr(self, '_ui_mode', 'legacy')}")
         self.web_view_left.setVisible(not self._highlights_mode)
         self._center_widget.setVisible(True)
         self.web_view_right.setVisible(True)
@@ -874,9 +1661,12 @@ class WorkspacePage(QWidget):
             f"if (typeof onEventsUpdated === 'function') onEventsUpdated({json.dumps(events_json)});"
             f"if (typeof onTimeUpdated === 'function') onTimeUpdated({json.dumps(time_json)});"
         )
-        for view in (self.web_view_left, self.web_view_center_controls, self.web_view_right):
-            if view and view.page():
-                view.page().runJavaScript(script)
+        if getattr(self, "web_view_unified", None) and self.web_view_unified.page():
+            self.web_view_unified.page().runJavaScript(script)
+        else:
+            for view in (getattr(self, "web_view_left", None), getattr(self, "web_view_center_controls", None), getattr(self, "web_view_right", None)):
+                if view and view.page():
+                    view.page().runJavaScript(script)
 
     def _get_annotations_at(self, ts_ms, tolerance_ms=50):
         """Annotazioni eventi al timestamp. Usa tolleranza ±tolerance_ms (default 50ms)."""
@@ -892,7 +1682,10 @@ class WorkspacePage(QWidget):
     def force_render_drawings_at(self, ts_ms: int):
         """Forza il rendering dei disegni al timestamp (non dipende da positionChanged)."""
         anns = self._get_annotations_at(ts_ms, tolerance_ms=50)
-        self.drawing_overlay.loadDrawingsFromProject(anns)
+        vw, vh = self.drawing_overlay.getVideoSize()
+        if vw <= 0 or vh <= 0:
+            vw, vh = max(1, self.video_player.width()), max(1, self.video_player.height())
+        self.drawing_overlay.loadDrawingsFromProject(anns, view_w_override=vw, view_h_override=vh)
         self.drawing_overlay.setDrawingsVisibility(True)
         self.drawing_overlay.viewport().update()
 
@@ -901,15 +1694,21 @@ class WorkspacePage(QWidget):
         ts = getattr(self, '_seek_target_ms', None)
         if ts is None:
             ts = self.video_player.position()
+        vw, vh = self.drawing_overlay.getVideoSize()
+        if vw <= 0 or vh <= 0:
+            vw, vh = max(1, self.video_player.width()), max(1, self.video_player.height())
         if self.video_player.state() == 1:
             if self.backend.active_clip_id:
                 anns = self._get_annotations_at(ts, tolerance_ms=50)
-                self.drawing_overlay.loadDrawingsFromProject(anns)
+                self.drawing_overlay.loadDrawingsFromProject(anns, view_w_override=vw, view_h_override=vh)
                 self.drawing_overlay.setDrawingsVisibility(True)
             else:
                 self.drawing_overlay.setDrawingsVisibility(False)
         else:
-            self.drawing_overlay.loadDrawingsFromProject(self._get_annotations_at(ts, tolerance_ms=50))
+            self.drawing_overlay.loadDrawingsFromProject(
+                self._get_annotations_at(ts, tolerance_ms=50),
+                view_w_override=vw, view_h_override=vh
+            )
             self.drawing_overlay.setDrawingsVisibility(True)
         self.drawing_overlay.viewport().update()
 
@@ -950,7 +1749,20 @@ class WorkspacePage(QWidget):
 
     def _on_annotation_modified(self, event_id, ann_index, new_data):
         self.backend.event_manager.update_annotation_in_event(event_id, ann_index, new_data)
-    
+
+    def _on_zoom_requested(self, delta: int, mouse_x: int, mouse_y: int):
+        """Rotella con strumento Zoom attivo: zoom verso il puntatore (max 5x)."""
+        factor = 1.0 + (delta / 1200.0)
+        self._zoom_level *= factor
+        self._zoom_level = max(1.0, min(self._zoom_max, self._zoom_level))
+        self.video_player.setZoomAt(self._zoom_level, mouse_x, mouse_y)
+        if self.video_player.duration() > 0:
+            self.video_player.setPosition(self.video_player.position())
+
+    def _on_zoom_level_changed(self, level: float):
+        """Sincronizza _zoom_level quando lo zoom cambia (es. da slider)."""
+        self._zoom_level = level
+
     def _on_empty_area_clicked(self, x, y):
         """Click su area vuota con tool=NONE → equivale a video click (per eventi)."""
         timestamp = self.video_player.position() if self.video_player else 0
@@ -1332,6 +2144,11 @@ class DashboardPage(QWidget):
         nav_new_project.clicked.connect(self._on_new_project)
         sidebar_layout.addWidget(nav_new_project)
 
+        nav_teams_players = QPushButton("👥  Squadre e Giocatori")
+        nav_teams_players.setProperty("class", "dashboardNavBtn")
+        nav_teams_players.setObjectName("dashboardNavTeamsPlayers")
+        sidebar_layout.addWidget(nav_teams_players)
+
         nav_settings = QPushButton("⚙  Impostazioni")
         nav_settings.setProperty("class", "dashboardNavBtn")
         nav_settings.setObjectName("dashboardNavSettings")
@@ -1347,10 +2164,14 @@ class DashboardPage(QWidget):
         self._dashboard_divider = divider
         divider.setFixedWidth(8)
 
-        # Contenuto principale
-        content = QWidget()
-        content.setObjectName("dashboardContent")
-        content_layout = QVBoxLayout(content)
+        # Contenuto principale (stack per Progetti / Squadre e Giocatori)
+        from PyQt5.QtWidgets import QStackedWidget
+        content_stacked = QStackedWidget()
+        content_stacked.setObjectName("dashboardContent")
+
+        # Pagina Progetti
+        projects_page = QWidget()
+        content_layout = QVBoxLayout(projects_page)
         content_layout.setContentsMargins(34, 30, 34, 22)
         content_layout.setSpacing(16)
         title = QLabel("Progetti")
@@ -1391,13 +2212,33 @@ class DashboardPage(QWidget):
         self.projects_grid.setColumnStretch(1, 1)
         self.projects_scroll.setWidget(self.projects_host)
         content_layout.addWidget(self.projects_scroll, 1)
+        content_stacked.addWidget(projects_page)
+
+        # Pagina Squadre e Giocatori
+        teams_page = QWidget()
+        teams_layout = QVBoxLayout(teams_page)
+        teams_layout.setContentsMargins(34, 30, 34, 22)
+        teams_layout.setSpacing(16)
+        teams_title = QLabel("Squadre e Giocatori")
+        teams_title.setObjectName("dashboardTitle")
+        teams_layout.addWidget(teams_title)
+        teams_sub = QLabel("Gestisci squadre e giocatori. Potrai collegare i track ID (da Player tracking) ai giocatori per statistiche personalizzate.")
+        teams_sub.setObjectName("dashboardSubtitle")
+        teams_sub.setWordWrap(True)
+        teams_layout.addWidget(teams_sub)
+        teams_layout.addStretch(1)
+        content_stacked.addWidget(teams_page)
+
+        content = content_stacked
 
         shell_layout.addWidget(sidebar, 0)
         shell_layout.addWidget(divider, 0)
         shell_layout.addWidget(content, 1)
         root.addWidget(shell, 1)
 
-        self._dashboard_nav_buttons = [nav_projects, nav_settings, nav_license]
+        self._dashboard_nav_buttons = [nav_projects, nav_teams_players, nav_settings, nav_license]
+        self._content_stacked = content_stacked
+        self._nav_to_index = {nav_projects: 0, nav_teams_players: 1}
         for btn in self._dashboard_nav_buttons:
             btn.clicked.connect(lambda _=False, b=btn: self._set_active_nav_button(b))
         QTimer.singleShot(0, lambda: self._set_active_nav_button(nav_projects))
@@ -1408,6 +2249,10 @@ class DashboardPage(QWidget):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
             btn.update()
+        idx = getattr(self, "_nav_to_index", {}).get(active_button, 0)
+        stack = getattr(self, "_content_stacked", None)
+        if stack is not None and 0 <= idx < stack.count():
+            stack.setCurrentIndex(idx)
         divider = getattr(self, "_dashboard_divider", None)
         if divider is not None and active_button is not None:
             center_global = active_button.mapToGlobal(active_button.rect().center())
@@ -1621,11 +2466,69 @@ class DashboardPage(QWidget):
         self._delete_project(project_id)
 
 
+class CloseAnalysisDialog(QDialog):
+    """Dialog per chiusura durante analisi, con spiegazione sotto ogni pulsante."""
+
+    Ferma, Continua, Annulla = 1, 2, 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._result = self.Annulla
+        self.setWindowTitle("Analisi in corso")
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        lbl = QLabel(
+            "Analisi in corso. Chiudere l'app non fermerà il motore.\n"
+            "Vuoi continuare?"
+        )
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        def add_option(btn_text, desc, role_val):
+            btn = QPushButton(btn_text)
+            desc_lbl = QLabel(desc)
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setStyleSheet("color: #666; font-size: 11px; margin-left: 8px;")
+            row = QVBoxLayout()
+            row.setSpacing(4)
+            row.addWidget(btn)
+            row.addWidget(desc_lbl)
+            layout.addLayout(row)
+            btn.clicked.connect(lambda: self._choose(role_val))
+            return btn
+
+        add_option(
+            "Ferma",
+            "Interrompi l'analisi e chiudi l'app (progressi salvati).",
+            self.Ferma,
+        )
+        add_option(
+            "Continua",
+            "Chiudi l'app e lascia l'analisi in corso; riceverai notifica al termine.",
+            self.Continua,
+        )
+        add_option(
+            "Annulla",
+            "Torna indietro e continua a usare l'app.",
+            self.Annulla,
+        )
+        self.setMinimumWidth(380)
+
+    def _choose(self, val):
+        self._result = val
+        self.accept()
+
+    def result_choice(self):
+        return self._result
+
+
 class AppRouter(QMainWindow):
     """Routing app: DashboardPage <-> WorkspacePage(projectId)."""
 
     def __init__(self):
         super().__init__()
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint)
         self.setContentsMargins(0, 0, 0, 0)
         self.setWindowTitle("Football Analyzer")
         self.setStyleSheet("""
@@ -1715,8 +2618,20 @@ QMainWindow {
         self.centralWidget().setContentsMargins(0, 0, 0, 0)
 
     def closeEvent(self, event):
-        if self.workspace_page is not None:
-            self.workspace_page.persist_project()
+        wp = self.workspace_page
+        if wp is not None and getattr(wp, "_analysis_in_progress", False):
+            dlg = CloseAnalysisDialog(self)
+            dlg.exec_()
+            choice = dlg.result_choice()
+            if choice == CloseAnalysisDialog.Annulla:
+                event.ignore()
+                return
+            if choice == CloseAnalysisDialog.Ferma:
+                wp.terminate_analysis_and_close_dialog()
+            else:
+                wp.save_background_analysis_flag()
+        if wp is not None:
+            wp.persist_project()
         event.accept()
 
 
@@ -1735,6 +2650,39 @@ def main():
     win = AppRouter()
     win.resize(1400, 900)
     win.show()
+
+    def _check_background_analysis_completed():
+        """Se l'utente ha chiuso con 'Continua' e l'analisi è terminata, mostra messaggio."""
+        try:
+            repo = ProjectRepository(str((Path(__file__).parent / "data").absolute()))
+            flag_path = repo.base_path / "pending_background_analysis.json"
+            if not flag_path.exists():
+                return
+            with open(flag_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            project_analysis_dir = data.get("project_analysis_dir")
+            if not project_analysis_dir:
+                flag_path.unlink(missing_ok=True)
+                return
+            finished_path = Path(project_analysis_dir) / "analysis_output" / "finished.json"
+            if not finished_path.exists():
+                return
+            with open(finished_path, "r", encoding="utf-8") as f:
+                fin = json.load(f)
+            if fin.get("success"):
+                QMessageBox.information(
+                    win,
+                    "Analisi completata",
+                    "Analisi completata in background. File pronti.",
+                )
+            flag_path.unlink(missing_ok=True)
+        except Exception:
+            try:
+                flag_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    QTimer.singleShot(1500, _check_background_analysis_completed)
     
     logging.debug("Football Analyzer Web UI started")
     
