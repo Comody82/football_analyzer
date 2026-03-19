@@ -1,0 +1,9 @@
+# Dataset calcio (Roboflow) - path risolti rispetto alla root del progetto.
+# Esegui gli script da: c:\football_analyzer
+path: ../datasets/soccer-yolox-dataset
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 8
+names: ['Ball', 'GOAL', 'Goalie', 'NED', 'Ref', 'USA', 'football', 'player']

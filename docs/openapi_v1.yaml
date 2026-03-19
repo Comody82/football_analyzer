@@ -1,0 +1,286 @@
+openapi: 3.0.3
+info:
+  title: Football Analyzer - Analysis API
+  description: |
+    API per l'analisi video di partite (cloud).
+    Il client chiama solo questa API; nessuna dipendenza diretta da Redis/Celery/provider.
+  version: "1.0"
+  contact:
+    name: Football Analyzer
+
+servers:
+  - url: https://api.example.com
+    description: Base URL configurabile (es. produzione)
+  - url: http://localhost:8000
+    description: Sviluppo locale
+
+tags:
+  - name: jobs
+    description: Creazione e gestione job di analisi
+
+paths:
+  /v1/jobs:
+    post:
+      tags: [jobs]
+      summary: Crea un nuovo job di analisi
+      description: |
+        Accetta video tramite URL (JSON) o upload multipart.
+        Restituisce job_id per polling status e result.
+      operationId: createJob
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+          multipart/form-data:
+            schema:
+              type: object
+              required: [video]
+              properties:
+                video:
+                  type: string
+                  format: binary
+                  description: File video
+                options:
+                  type: string
+                  description: JSON stringificato di JobOptions
+      responses:
+        "201":
+          description: Job creato
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobCreated"
+        "400":
+          description: Parametri mancanti o non validi
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Payload troppo grande
+
+  /v1/jobs/{id}:
+    get:
+      tags: [jobs]
+      summary: Dettaglio job
+      operationId: getJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: job_id restituito da POST /v1/jobs
+      responses:
+        "200":
+          description: Dettaglio job (stato, progress, date)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+        "404":
+          description: Job inesistente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/jobs/{id}/status:
+    get:
+      tags: [jobs]
+      summary: Stato job (per polling)
+      operationId: getJobStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stato aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+        "404":
+          description: Job inesistente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/jobs/events:
+    get:
+      tags: [jobs]
+      summary: Stream eventi SSE per un job (notifiche Fase 4)
+      description: |
+        Server-Sent Events: il server invia eventi quando lo stato del job cambia.
+        Il client passa job_id in query; alla ricezione di status "completed" o "failed" chiude la connessione.
+        Fallback client: se SSE non disponibile, usare polling GET /v1/jobs/{id}/status.
+      operationId: getJobEvents
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: job_id restituito da POST /v1/jobs
+      responses:
+        "200":
+          description: Stream SSE (Content-Type text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Righe SSE: event: state\ndata: {"job_id":"...","status":"...",...}\n\n
+                  Formato data = JobStatus (job_id, status, progress, message, result_url).
+        "400":
+          description: job_id mancante o non valido
+        "404":
+          description: job inesistente (opzionale; il server può chiudere lo stream con un evento failed)
+
+  /v1/jobs/{id}/result:
+    get:
+      tags: [jobs]
+      summary: Risultato analisi
+      description: |
+        Disponibile solo quando status === "completed".
+        Body conforme a AnalysisResult (docs/analysis_result_schema.json).
+      operationId: getJobResult
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Risultato analisi (schema Step 0.1)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisResult"
+        "202":
+          description: Job non ancora completato
+        "404":
+          description: Job inesistente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    CreateJobRequest:
+      type: object
+      properties:
+        video_url:
+          type: string
+          format: uri
+          description: URL del video su storage (se assente, usare multipart)
+        options:
+          $ref: "#/components/schemas/JobOptions"
+      oneOf:
+        - required: [video_url]
+        - description: "Se multipart, video come file e options come JSON string"
+
+    JobOptions:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [full, player, ball]
+          default: full
+        target_fps:
+          type: number
+          default: 10
+        preprocess:
+          type: boolean
+          default: false
+
+    JobCreated:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+          enum: [pending]
+        message:
+          type: string
+
+    JobStatus:
+      type: object
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        message:
+          type: string
+        result_url:
+          type: string
+          format: uri
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AnalysisResult:
+      description: "Schema unico risultato analisi (Step 0.1). Vedi docs/analysis_result_schema.json per JSON Schema completo."
+      type: object
+      required: [version, source]
+      properties:
+        version:
+          type: string
+          example: "1.0"
+        source:
+          type: string
+          enum: [local, cloud]
+        project_id:
+          type: string
+          nullable: true
+        calibration:
+          type: object
+          nullable: true
+        parameters_used:
+          type: object
+        tracking:
+          type: object
+          properties:
+            player_tracks: {}
+            ball_tracks: {}
+        events:
+          type: object
+          properties:
+            manual: { type: array }
+            automatic: { type: array }
+        metrics:
+          type: object
+          properties:
+            players: { type: array }
+            teams: { type: array }
+        clips:
+          type: array
+        heatmaps:
+          type: object
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        detail:
+          type: string

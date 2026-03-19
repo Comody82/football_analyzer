@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/football-analyzer/analysis-result",
+  "title": "AnalysisResult",
+  "description": "Formato unico risultato analisi (locale o cloud). Usato per caricamento risultati in client e per API job result.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Versione dello schema risultato (es. 1.0)",
+      "default": "1.0"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["local", "cloud"],
+      "description": "Origine analisi"
+    },
+    "project_id": {
+      "type": ["string", "null"],
+      "description": "ID progetto (se applicabile)"
+    },
+    "calibration": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "description": "Calibrazione campo: omografia pixel → metri (FIFA 105x68m)",
+          "properties": {
+            "pixel_points": {
+              "type": "array",
+              "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+            },
+            "field_points": {
+              "type": "array",
+              "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+            },
+            "homography": {
+              "type": ["array", "null"],
+              "description": "Matrice 3x3 per cv2.perspectiveTransform (pixel → campo)"
+            },
+            "field_length_m": { "type": "number", "default": 105 },
+            "field_width_m": { "type": "number", "default": 68 }
+          }
+        }
+      ]
+    },
+    "parameters_used": {
+      "type": "object",
+      "description": "Parametri con cui è stata eseguita l'analisi",
+      "properties": {
+        "fps": { "type": "number" },
+        "target_fps": { "type": ["number", "null"] },
+        "preprocess": { "type": "boolean" },
+        "mode": { "type": "string", "enum": ["full", "player", "ball"] }
+      }
+    },
+    "tracking": {
+      "type": "object",
+      "properties": {
+        "player_tracks": {
+          "type": "object",
+          "description": "player_tracks.json: frames con detections (x,y,w,h, team, track_id)",
+          "properties": {
+            "frames": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "frame": { "type": "integer" },
+                  "detections": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                        "w": { "type": "number" },
+                        "h": { "type": "number" },
+                        "team": { "type": "integer" },
+                        "track_id": { "type": "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "width": { "type": "integer" },
+            "height": { "type": "integer" },
+            "fps": { "type": "number" }
+          }
+        },
+        "ball_tracks": {
+          "type": "object",
+          "description": "ball_tracks.json: frames con detection palla (x,y,w,h o null)",
+          "properties": {
+            "frames": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "frame": { "type": "integer" },
+                  "detection": { "type": ["object", "null"] }
+                }
+              }
+            },
+            "width": { "type": "integer" },
+            "height": { "type": "integer" },
+            "fps": { "type": "number" }
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "description": "Eventi manuali (UI) e automatici (event engine)",
+      "properties": {
+        "manual": {
+          "type": "array",
+          "description": "Eventi annotati dall'utente (event_types + events)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "event_type_id": { "type": "string" },
+              "timestamp_ms": { "type": "integer" },
+              "description": { "type": "string" },
+              "team": { "type": ["string", "null"] },
+              "label": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "automatic": {
+          "type": "array",
+          "description": "Eventi da event engine: possesso, passaggio, recupero, tiro, pressing",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["possession", "pass", "recovery", "shot", "pressing"] },
+              "timestamp_ms": { "type": "integer" },
+              "end_ms": { "type": ["integer", "null"] },
+              "team": { "type": ["integer", "null"] },
+              "track_id": { "type": ["integer", "null"] },
+              "track_id_to": { "type": ["integer", "null"] },
+              "zone": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "players": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "track_id": { "type": "integer" },
+              "team": { "type": "integer" },
+              "distance_m": { "type": "number" },
+              "heatmap_grid": { "type": ["array", "object", "null"] },
+              "zones_pct": { "type": "object" },
+              "passes": { "type": "integer" },
+              "passes_success": { "type": "integer" },
+              "touches": { "type": "integer" }
+            }
+          }
+        },
+        "teams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "team_id": { "type": "integer" },
+              "possession_pct": { "type": "number" },
+              "passes_total": { "type": "integer" },
+              "pressure_map": { "type": ["array", "object", "null"] },
+              "recovery_zone_avg": { "type": ["array", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "clips": {
+      "type": "array",
+      "description": "Clip / highlights (riferimenti: path locale o URL cloud)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "start_ms": { "type": "integer" },
+          "end_ms": { "type": "integer" },
+          "url_or_path": { "type": "string" }
+        }
+      }
+    },
+    "heatmaps": {
+      "type": "object",
+      "description": "Mappe di calore: track_id o 'team_0'/'team_1' → URL/path o griglia 2D",
+      "additionalProperties": { "type": ["string", "array", "object"] }
+    }
+  },
+  "required": ["version", "source"]
+}

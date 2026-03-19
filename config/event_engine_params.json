@@ -1,0 +1,43 @@
+{
+  "$schema": "https://football-analyzer.github.io/schemas/event_engine_params.json",
+  "version": "1.0",
+  "description": "Soglie e parametri per event engine e metriche (possesso, passaggio, recupero, tiro, pressing). Condivisi tra analisi locale e backend cloud.",
+  "possession": {
+    "max_ball_player_distance_m": 2.0,
+    "min_possession_time_s": 0.5,
+    "change_possession_on_opponent_control": true,
+    "change_possession_distance_m": 2.0
+  },
+  "events": {
+    "pass": {
+      "use_possession": true,
+      "max_ball_receiver_distance_m": 3.0,
+      "same_team_required": true
+    },
+    "recovery": {
+      "defensive_area_x_min_m": 0,
+      "defensive_area_x_max_m": 17,
+      "defensive_area_x_max_other_side_m": 88,
+      "defensive_area_x_min_other_side_m": 105,
+      "comment": "Area difensiva: x in [0,17] (porta sinistra) e [88,105] (porta destra). Usare calibrazione per coordinate campo."
+    },
+    "shot": {
+      "min_ball_speed_m_s": 8.0,
+      "goal_center_y_m": 34,
+      "goal_left_x_m": 0,
+      "goal_right_x_m": 105,
+      "max_angle_deg_from_goal": 45,
+      "min_shot_interval_ms": 1500,
+      "comment": "Tiro: velocità palla + direzione verso porta. min_shot_interval_ms evita multipli eventi sullo stesso tiro."
+    },
+    "pressing": {
+      "radius_around_ball_m": 5.0,
+      "min_players_to_count_pressing": 1,
+      "comment": "Conteggio giocatori per team nel raggio attorno alla palla."
+    }
+  },
+  "field": {
+    "length_m": 105,
+    "width_m": 68
+  }
+}
