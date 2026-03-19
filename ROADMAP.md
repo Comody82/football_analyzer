@@ -43,7 +43,7 @@
 - [x] Integrare checkpoint addestrato in `player_detection.py`
 - [x] Adattare 8 classi: Ball, GOAL, Goalie, NED, Ref, USA, football, player
 - [x] Test end-to-end su video di prova
-- [ ] Implementare flusso cloud completo: RunPod Serverless Endpoint (Docker image in build)
+- [x] Implementare flusso cloud completo: RunPod Serverless Endpoint (Docker image attiva, test end-to-end superato)
 
 ### UI / UX
 - [ ] Rifare estetica generale interfaccia
