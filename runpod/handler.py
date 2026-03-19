@@ -27,12 +27,25 @@ MODEL_PATH = Path("/app/models/best_ckpt.pth")
 
 
 def _ensure_model():
-    """Scarica best_ckpt.pth da R2 se non presente."""
+    """Scarica best_ckpt.pth da R2 via boto3 (credenziali da env vars)."""
     if MODEL_PATH.exists():
+        LOG.info("Model already present: %.1f MB", MODEL_PATH.stat().st_size / 1e6)
         return
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LOG.info("Downloading model from %s ...", MODEL_URL)
-    urllib.request.urlretrieve(MODEL_URL, str(MODEL_PATH))
+    LOG.info("Downloading model from R2 via boto3...")
+    import boto3
+    endpoint = os.environ["R2_ENDPOINT_URL"]
+    access_key = os.environ["R2_ACCESS_KEY_ID"]
+    secret_key = os.environ["R2_SECRET_ACCESS_KEY"]
+    bucket = os.environ.get("R2_BUCKET_NAME", "match-analysis-videos")
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="auto",
+    )
+    client.download_file(bucket, "models/best_ckpt.pth", str(MODEL_PATH))
     LOG.info("Model downloaded: %.1f MB", MODEL_PATH.stat().st_size / 1e6)
 
 

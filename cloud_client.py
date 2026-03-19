@@ -21,7 +21,7 @@ LOG = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 60
 POLL_INTERVAL_DEFAULT = 5
-RUNPOD_BASE = "https://api.runpod.io/v2"
+RUNPOD_BASE = "https://api.runpod.ai/v2"
 
 
 def _load_env():
