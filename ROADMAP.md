@@ -58,6 +58,29 @@
 
 ---
 
+## 🏗️ PIPELINE COMPLETA (VERSIONE PRO)
+> Ordine corretto: prima dati affidabili, poi visualizzazione e output.
+
+```
+Video input (qualsiasi camera)
+    ↓ [1] Game Segment Detection      → taglia inizio/fine partita, intervallo
+    ↓ [2] Preprocessing               → resize, contrasto, luce
+    ↓ [3] Detection (YOLOX)           → rileva giocatori e palla (frame wide o tiled)
+    ↓ [4] Tracking (ByteTrack)        → ID persistenti e traiettorie
+    ↓ [5] Field Calibration           → input utente → homography_matrix
+    ↓ [6] Coordinate Mapping          → pixel → metri reali (sblocca statistiche)
+    ↓ [7] Tracking Refinement         → interpolazione, filtri fisici, vincoli campo
+    ↓ [8] Event Engine                → passaggi, tiri, recuperi, pressing
+    ↓ [9] Metrics Engine              → distanza, heatmap, possesso, PPDA
+    ↓ [10] Virtual Camera             → crop intelligente + smoothing → video "regia TV"
+    ↓ [11] Lavagna Tattica 2D         → pallini su campo in coordinate reali (metri)
+    ↓ [12] Report AI + Export         → PDF, CSV, JSON, testo automatico
+```
+
+> **Principio chiave:** Virtual Camera e Lavagna 2D sono layer di visualizzazione — vengono DOPO i dati puliti, non prima.
+
+---
+
 ## 🚀 FUNZIONALITÀ PIANIFICATE
 
 ### 📹 Clip & Video Intelligence (Prelyt Clips)
@@ -137,6 +160,30 @@
 - [ ] **Vantaggio vs Veo**: Veo vende hardware, Prelyt vende software camera-agnostic
 - [ ] **Vero vantaggio competitivo**: camera-agnostic platform
 - [ ] **Mercato target**: club dilettantistici che hanno già telecamere o GoPro
+
+---
+
+### 🗺️ Field Calibration + Coordinate Mapping (Prelyt Core)
+> Trasforma coordinate pixel → metri reali. Sblocca statistiche, heatmap, lavagna 2D precisa e tutto il Metrics Engine.
+
+- [ ] **Field Calibration UI**: utente clicca 4-6 punti noti sul campo (angoli area, centrocampo) → calcola `homography_matrix`
+- [ ] **Homography Matrix**: `cv2.findHomography(pixel_points, real_world_points)` → matrice di trasformazione
+- [ ] **Coordinate Mapping**: `real_coords = cv2.perspectiveTransform(pixel_coords, H)` → output in metri (0-105 x, 0-68 y)
+- [ ] **Output per frame**: ogni detection include `{x_m: 42.3, y_m: 18.2}` oltre alle coordinate pixel
+- [ ] **Calibrazione salvata per progetto**: ricalibra una volta sola, usata per tutta la partita
+- [ ] **Validazione visiva**: overlay campo reale su frame per verificare correttezza calibrazione
+- [ ] **Preset comuni**: campo 11 standard (105×68m), campo 7 (60×40m), campo 5 (40×20m)
+
+---
+
+### 📐 Tracking Refinement (Prelyt Core)
+> Pulisce i dati di tracking prima che arrivino a Event Engine e Metrics Engine.
+
+- [ ] **Interpolazione gap**: se giocatore sparisce N frame → interpola posizione tra frame prima e dopo
+- [ ] **Vincolo velocità fisica**: velocità max calcio = 10 m/s → `if speed > 10: discard_or_smooth`
+- [ ] **Filtro boundary campo**: scarta detection fuori dal rettangolo di gioco reale
+- [ ] **Smoothing traiettorie**: filtro Gaussian/Kalman sulle coordinate per eliminare jitter
+- [ ] **Confidence scoring**: ogni detection ha score qualità → segnala dati "stimati" nell'interfaccia
 
 ---
 
