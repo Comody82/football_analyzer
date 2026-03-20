@@ -283,6 +283,56 @@ Video input (qualsiasi camera)
 
 ---
 
+### 🔥 Heatmap Live + Timeline (Prelyt Insights)
+> Visualizzazione dinamica del movimento squadra nel tempo, con controllo temporale interattivo.
+
+- [ ] **Slider tempo**: seleziona intervallo temporale (es. minuto 20-35) → heatmap si aggiorna in tempo reale
+- [ ] **Heatmap squadra**: densità di presenza per zona del campo per ogni squadra
+- [ ] **Heatmap individuale**: zoom su singolo giocatore → zone più frequentate
+- [ ] **Animazione movimento**: play della heatmap che evolve nel tempo (vedi come la squadra si sposta)
+- [ ] **Filtro per fase**: solo fase offensiva / solo fase difensiva / transizioni
+- [ ] **Confronto primo/secondo tempo**: heatmap split per vedere differenze tra i due tempi
+
+---
+
+### 🫸 Pressing Intensity Map (Prelyt Insights)
+> Mappa visiva di dove e quanto la squadra pressa, basata su densità giocatori vicino alla palla.
+
+- [ ] **Calcolo pressing score per frame**: `pressing = Σ(1/distance_to_ball)` per ogni difensore entro soglia
+- [ ] **Mappa densità**: overlay colorato sul campo (rosso = alta intensità pressing, blu = bassa)
+- [ ] **PPDA** (Passes Per Defensive Action): metrica standard pressing — passaggi avversari per ogni azione difensiva
+- [ ] **Pressing zones**: identifica in quali zone del campo la squadra pressa di più
+- [ ] **Timeline pressing**: grafico temporale dell'intensità pressing durante la partita
+- [ ] **Confronto squadre**: pressing squadra A vs squadra B nello stesso match
+
+---
+
+### 👤 Player Comparison (Prelyt Scout)
+> Confronto diretto tra giocatori o tra prestazioni dello stesso giocatore in partite diverse.
+
+- [ ] **Confronto tra giocatori**: seleziona 2 giocatori → tabella comparativa (distanza, velocità, tocchi, zone)
+- [ ] **Confronto tra partite**: stesso giocatore in match diversi → trend nel tempo
+- [ ] **Radar chart**: grafico a ragno con metriche chiave (velocità, distanza, pressing, tocchi, heatmap)
+- [ ] **Ranking giocatori**: ordina per metrica (es. "chi ha corso di più?", "chi ha pressato di più?")
+- [ ] **Export scheda giocatore**: PDF individuale con radar + heatmap + statistiche
+- [ ] **Storico partite**: accumula dati partita per partita per ogni giocatore
+
+---
+
+### ⚠️ Error Detection AI (Prelyt Core)
+> Il sistema segnala automaticamente quando i dati di tracking non sono affidabili, evitando che statistiche errate vengano presentate come veritiere.
+
+- [ ] **Confidence score per detection**: ogni bounding box ha score 0-1 → sotto soglia = "dato stimato"
+- [ ] **Segnalazione tracking incerto**: se un giocatore sparisce e riappare con ID diverso → flag `id_switch`
+- [ ] **Velocità impossibile**: se giocatore "teletrasporta" (speed > 10 m/s) → flag `teleport_error`
+- [ ] **Gap detection**: se giocatore manca per >5 frame → flag `interpolated` (dato stimato, non reale)
+- [ ] **Qualità frame**: rileva frame mossi, sovraesposti, parzialmente coperti → abbassa confidence
+- [ ] **Report qualità analisi**: al termine dell'analisi mostra score globale (es. "Qualità dati: 87%")
+- [ ] **UI warning**: icona ⚠️ accanto a statistiche con dati a bassa affidabilità
+- [ ] **Log errori export**: CSV con tutti gli eventi di tracking incerto per debug avanzato
+
+---
+
 ### 🔍 Scouting (Prelyt Scout)
 - [ ] Database giocatori
 - [ ] Report individuali per giocatore
