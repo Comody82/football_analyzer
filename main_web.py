@@ -1395,6 +1395,35 @@ class WorkspacePage(QWidget):
         use_local = rb_local.isChecked()
         self._run_preprocess_choice = chk.isChecked()
 
+        # Controllo calibrazione campo: suggerisci solo se non già presente
+        from analysis.config import get_calibration_path
+        cal_path = get_calibration_path(project_dir)
+        if not cal_path.exists():
+            cal_msg = QMessageBox(self.window())
+            cal_msg.setWindowTitle("Calibrazione campo")
+            cal_msg.setIcon(QMessageBox.Information)
+            cal_msg.setText(
+                "<b>Calibrazione campo non trovata.</b><br><br>"
+                "La calibrazione trasforma le posizioni dei giocatori da pixel a metri reali, "
+                "abilitando statistiche precise (distanza percorsa, heatmap, pressing).<br><br>"
+                "<b>Quando calibrare:</b> se il video riprende il <b>campo intero</b> "
+                "(camera fissa wide, drone, tribuna alta).<br><br>"
+                "<b>Quando NON calibrare:</b> se stai usando un <b>video broadcast TV</b> "
+                "— la camera zooma e non vedi mai i 4 angoli del campo, quindi la calibrazione "
+                "non è possibile e le statistiche rimarranno approssimative.<br><br>"
+                "Vuoi calibrare il campo prima di avviare l'analisi?"
+            )
+            cal_msg.setTextFormat(Qt.RichText)
+            btn_calibra = cal_msg.addButton("Calibra ora", QMessageBox.AcceptRole)
+            btn_skip = cal_msg.addButton("Continua senza", QMessageBox.RejectRole)
+            cal_msg.setDefaultButton(btn_skip)
+            cal_msg.exec_()
+            if cal_msg.clickedButton() == btn_calibra:
+                self.show_field_calibration()
+                # Se dopo la calibrazione l'utente ha salvato, procedi. Altrimenti annulla.
+                if not cal_path.exists():
+                    return  # ha aperto il dialog ma non ha salvato → annulla analisi
+
         if use_local:
             self._set_analysis_mode("local")
             hw = self._hardware_check_result
