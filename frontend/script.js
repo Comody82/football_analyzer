@@ -913,6 +913,12 @@ document.getElementById('btnReclusterTeams')?.addEventListener('click', () => {
     if (backend && typeof backend.openReclusterTeams === 'function') backend.openReclusterTeams();
 });
 
+document.getElementById('btnTacticalBoard')?.addEventListener('click', () => {
+    if (backend && typeof backend.toggleTacticalBoard === 'function') {
+        backend.toggleTacticalBoard();
+    }
+});
+
 document.getElementById('btnShowTracking')?.addEventListener('click', () => {
     if (!backend || typeof backend.toggleTrackingOverlay !== 'function') return;
     const res = backend.toggleTrackingOverlay();

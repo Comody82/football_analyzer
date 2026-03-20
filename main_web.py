@@ -452,6 +452,17 @@ class WorkspacePage(QWidget):
         self.web_view_center_controls.page().setBackgroundColor(QColor(0x0B, 0x13, 0x20))
         self.web_view_center_controls.setStyleSheet("background: transparent; border: none;")
         center_layout.addWidget(self.web_view_center_controls, 2)
+
+        self.web_view_tactical = CustomWebEngineView()
+        self.web_view_tactical.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+        self.web_view_tactical.page().setBackgroundColor(QColor(0x0B, 0x13, 0x20))
+        self.web_view_tactical.setStyleSheet("background: transparent; border: none;")
+        self.web_view_tactical.setFixedHeight(220)
+        self.web_view_tactical.hide()
+        tactical_url = QUrl.fromLocalFile(str(Path(__file__).parent / "frontend" / "tactical_board.html"))
+        self.web_view_tactical.load(tactical_url)
+        center_layout.addWidget(self.web_view_tactical, 0)
+
         self._center_stack.addWidget(center_normal_widget)
 
         # Colonna destra: WebView Clip/Statistiche
@@ -496,6 +507,7 @@ class WorkspacePage(QWidget):
         self.web_view_left.page().setWebChannel(self.channel)
         self.web_view_center_controls.page().setWebChannel(self.channel)
         self.web_view_right.page().setWebChannel(self.channel)
+        self.web_view_tactical.page().setWebChannel(self.channel)
         self.btn_open_video_overlay.clicked.connect(self._handle_open_video_request)
         self.backend.videoLoaded.connect(lambda _path: self._update_open_video_cta_visibility())
         self.backend.videoLoaded.connect(lambda _path: self._load_tracking_overlay())

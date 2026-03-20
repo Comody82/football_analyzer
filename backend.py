@@ -1322,6 +1322,29 @@ class BackendBridge(QObject):
             logging.warning(f"Errore salvataggio progetto: {ex}")
             return False
 
+    @pyqtSlot(result=int)
+    def getCurrentPositionMs(self):
+        if self.video_player:
+            return int(getattr(self.video_player, '_position_ms', 0) or 0)
+        return 0
+
+    @pyqtSlot(result=str)
+    def getPlayerTracksJson(self):
+        if self.video_player:
+            tracks = getattr(self.video_player, '_player_tracks', None)
+            if tracks:
+                return json.dumps(tracks)
+        return '{}'
+
+    @pyqtSlot(result=bool)
+    def toggleTacticalBoard(self):
+        if self.parent_window and hasattr(self.parent_window, 'web_view_tactical'):
+            tb = self.parent_window.web_view_tactical
+            visible = not tb.isVisible()
+            tb.setVisible(visible)
+            return visible
+        return False
+
 
 class _VideoDownloadWorker(QObject):
     finished = pyqtSignal(str)
