@@ -1460,21 +1460,27 @@ class WorkspacePage(QWidget):
         self._analysis_in_progress = False
 
     def _on_cloud_result_ready(self, payload: dict):
-        """Risultato analisi cloud pronto: salva su disco + carica in UI unificata."""
-        # Salva player_tracks su disco → _load_tracking_overlay() lo trova normalmente
+        """Risultato analisi cloud pronto: salva su disco + post-processing locale + carica in UI."""
+        import json as _json
+
+        project_dir = self._get_project_analysis_dir()
+
+        # 1. Salva player_tracks su disco
         try:
-            project_dir = self._get_project_analysis_dir()
             if project_dir:
                 from analysis.player_tracking import get_tracks_path
                 tracks_data = (payload.get("tracking") or {}).get("player_tracks")
                 if tracks_data:
                     tracks_path = get_tracks_path(project_dir)
-                    import json as _json
                     with open(tracks_path, "w", encoding="utf-8") as f:
                         _json.dump(tracks_data, f)
-                    logging.info("Cloud tracks salvati su disco: %s", tracks_path)
+                    logging.info("Cloud tracks salvati: %s", tracks_path)
         except Exception as e:
-            logging.warning("Salvataggio cloud tracks su disco fallito: %s", e)
+            logging.warning("Salvataggio cloud tracks fallito: %s", e)
+
+        # 2. Post-processing locale: coordinate in metri + event engine + metrics
+        if project_dir:
+            self._run_cloud_postprocessing(project_dir, payload)
 
         self.load_analysis_result(result_payload=payload)
         QMessageBox.information(
@@ -1482,6 +1488,78 @@ class WorkspacePage(QWidget):
             "Analisi in cloud",
             "Analisi completata. I risultati sono stati caricati.",
         )
+
+    def _run_cloud_postprocessing(self, project_dir: str, payload: dict):
+        """
+        Post-processing locale dopo analisi cloud:
+        - Applica homography per aggiungere coordinate in metri ai tracks
+        - Esegue event engine (se ball_tracks disponibili)
+        - Esegue metrics engine (se events disponibili)
+        Tutto silenzioso: fallimenti non bloccano il caricamento risultati.
+        """
+        import json as _json
+        from pathlib import Path
+
+        # 2a. Applica coordinate in metri al player_tracks salvato
+        try:
+            from analysis.config import get_calibration_path
+            from analysis.homography import get_calibrator
+            from analysis.player_tracking import get_tracks_path
+
+            cal_path = get_calibration_path(project_dir)
+            calibrator = get_calibrator(str(cal_path)) if cal_path.exists() else None
+
+            if calibrator:
+                tracks_path = get_tracks_path(project_dir)
+                if tracks_path.exists():
+                    with open(tracks_path, "r", encoding="utf-8") as f:
+                        tracks = _json.load(f)
+
+                    # Aggiunge x_m, y_m a ogni detection
+                    for frame in tracks.get("frames", []):
+                        for det in frame.get("detections", []):
+                            cx = det.get("x", 0) + det.get("w", 0) / 2
+                            cy = det.get("y", 0) + det.get("h", 0)  # base del bbox
+                            pt = calibrator.pixel_to_field(cx, cy)
+                            if pt:
+                                det["x_m"] = round(pt[0], 2)
+                                det["y_m"] = round(pt[1], 2)
+
+                    with open(tracks_path, "w", encoding="utf-8") as f:
+                        _json.dump(tracks, f)
+                    logging.info("Coordinate in metri aggiunte ai tracks cloud")
+        except Exception as e:
+            logging.warning("Coordinate mapping cloud fallito: %s", e)
+
+        # 2b. Event engine (richiede anche ball_tracks)
+        try:
+            from analysis.event_engine import run_event_engine_from_project
+            from analysis.ball_tracking import get_ball_tracks_path
+
+            bt_path = get_ball_tracks_path(project_dir)
+            if bt_path.exists():
+                fps = payload.get("summary", {}).get("fps") or 3.0
+                ok = run_event_engine_from_project(project_dir, fps=fps)
+                logging.info("Event engine post-cloud: %s", "ok" if ok else "skipped")
+            else:
+                logging.info("Event engine skipped: ball_tracks non disponibili")
+        except Exception as e:
+            logging.warning("Event engine post-cloud fallito: %s", e)
+
+        # 2c. Metrics engine (richiede events_engine.json)
+        try:
+            from analysis.metrics import run_metrics_from_project
+            from analysis.config import get_analysis_output_path
+
+            events_path = get_analysis_output_path(project_dir) / "detections" / "events_engine.json"
+            if events_path.exists():
+                fps = payload.get("summary", {}).get("fps") or 3.0
+                ok = run_metrics_from_project(project_dir, fps=fps)
+                logging.info("Metrics engine post-cloud: %s", "ok" if ok else "skipped")
+            else:
+                logging.info("Metrics engine skipped: events_engine.json non disponibile")
+        except Exception as e:
+            logging.warning("Metrics engine post-cloud fallito: %s", e)
 
     def _on_cloud_job_failed(self, job_id: str, message: str):
         QMessageBox.warning(
