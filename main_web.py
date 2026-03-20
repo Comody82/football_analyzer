@@ -1429,17 +1429,22 @@ class WorkspacePage(QWidget):
         if not video_path or not os.path.isfile(video_path):
             QMessageBox.warning(self.window(), "Analisi in cloud", "Apri prima un video valido.")
             return
-        # Usa il video preprocessato se disponibile (risoluzione ridotta → più veloce)
+        # Preprocessing automatico: se necessario riduce risoluzione/fps, altrimenti copia diretta
         project_dir = self._get_project_analysis_dir()
         if project_dir:
             try:
-                from analysis.video_preprocessing import get_preprocessed_path
+                from analysis.video_preprocessing import get_preprocessed_path, ensure_preprocessed, needs_preprocessing
                 pp = get_preprocessed_path(project_dir)
-                if pp.exists():
-                    video_path = str(pp)
-                    logging.info("Cloud analysis: uso video preprocessato %s", video_path)
-            except Exception:
-                pass
+                if not pp.exists():
+                    if needs_preprocessing(video_path):
+                        logging.info("Cloud analysis: preprocessing necessario, avvio riduzione risoluzione/fps...")
+                    else:
+                        logging.info("Cloud analysis: video già ottimizzato, copia diretta senza ricodifica")
+                    ensure_preprocessed(video_path, str(pp))
+                video_path = str(pp)
+                logging.info("Cloud analysis: uso video %s", video_path)
+            except Exception as e:
+                logging.warning("Cloud analysis: preprocessing fallito (%s), uso video originale", e)
         options = {
             "conf_thresh": 0.3,
             "target_fps": 3.0,  # 3 fps → meno frame, più veloce, entro timeout RunPod

@@ -3,6 +3,7 @@ Video preprocessing per analisi automatica.
 Downscale a 720p, FPS max 25, eventuale stabilizzazione (opzionale).
 """
 import cv2
+import shutil
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -10,6 +11,49 @@ from .config import MAX_RESOLUTION, MAX_FPS
 
 PREPROCESSED_DIR = "preprocessed"
 OUTPUT_FILENAME = "preprocessed.mp4"
+
+
+def needs_preprocessing(
+    input_path: str,
+    max_resolution: Tuple[int, int] = MAX_RESOLUTION,
+    max_fps: int = MAX_FPS,
+) -> bool:
+    """Ritorna True solo se il video supera i limiti di risoluzione o FPS."""
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        return False
+    try:
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        return w > max_resolution[0] or h > max_resolution[1] or fps > max_fps
+    finally:
+        cap.release()
+
+
+def ensure_preprocessed(
+    input_path: str,
+    output_path: str,
+    max_resolution: Tuple[int, int] = MAX_RESOLUTION,
+    max_fps: int = MAX_FPS,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> str:
+    """
+    Garantisce che esista un video pronto per l'analisi.
+    - Se il video è già entro i limiti → copia diretta (nessuna ricodifica)
+    - Se supera i limiti → preprocessing completo
+    Ritorna il path del file da usare per l'analisi.
+    """
+    if not needs_preprocessing(input_path, max_resolution, max_fps):
+        # Video già ottimizzato: copia senza ricodifica
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(input_path, output_path)
+        if progress_callback:
+            progress_callback(1, 1, "Completato")
+        return output_path
+    # Preprocessing necessario
+    preprocess_video(input_path, output_path, max_resolution, max_fps, progress_callback)
+    return output_path
 
 
 def _compute_target_size(
