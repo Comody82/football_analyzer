@@ -333,6 +333,29 @@ Video input (qualsiasi camera)
 
 ---
 
+### 🧩 Lavagna Tattica Interattiva (Prelyt Tactics)
+> Strumento standalone per allenatori: posizionamento manuale dei giocatori sul campo, animazioni di schema, da mostrare ai giocatori prima o dopo la partita. Indipendente dall'analisi video.
+
+- [ ] **Campo 2D interattivo**: campo verde con linee bianche, orientazione verticale o orizzontale selezionabile
+- [ ] **Pedine giocatori drag & drop**: pallini colorati con ruolo/numero (POR, DC, TS, CC, AD, ecc.) trascinabili liberamente sul campo
+  - Squadra A → colore personalizzabile (default blu)
+  - Squadra B → colore personalizzabile (default rosso)
+  - Portiere → colore distinto
+- [ ] **Ruoli predefiniti**: toolbar con le pedine per ogni ruolo — click per aggiungere al campo
+- [ ] **Moduli rapidi**: carica automaticamente formazione 4-4-2, 4-3-3, 3-5-2, ecc. con un click
+- [ ] **Strumenti disegno integrati**: frecce di movimento, linee tratteggiate, cerchi zona, testo libero
+  - Freccia corsa giocatore
+  - Freccia passaggio
+  - Zona evidenziata (rettangolo/cerchio colorato semitrasparente)
+- [ ] **Animazione schema**: registra sequenza di posizioni → riproduci come animazione fluida per mostrare lo schema in movimento
+- [ ] **Salvataggio schemi**: salva e ricarica schemi con nome (es. "Calcio d'angolo sx", "Pressing alto 4-3-3")
+- [ ] **Export immagine**: snapshot PNG/JPG della lavagna per invio su WhatsApp/email
+- [ ] **Export video animazione**: esporta l'animazione come MP4 per condivisione
+- [ ] **Modalità presentazione**: fullscreen per proiettare su TV/schermo nello spogliatoio
+- [ ] **Integrazione con analisi**: opzione per caricare sulla lavagna le posizioni reali rilevate dal video a un dato minuto
+
+---
+
 ### 🔍 Scouting (Prelyt Scout)
 - [ ] Database giocatori
 - [ ] Report individuali per giocatore
