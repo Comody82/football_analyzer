@@ -19,6 +19,23 @@
       cursor: pointer; transition: background 0.15s;
     }
     .tab-btn.active { background: #17806a; border-color: #1e947c; color: #eafff8; }
+    /* Mode toggle (Match / Live) */
+    .mode-btn {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      color: #8fadc8; font-size: 11px; padding: 3px 10px; border-radius: 5px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .mode-btn.active { background: rgba(59,130,246,0.3); border-color: rgba(59,130,246,0.5); color: #93c5fd; }
+    .mode-btn.live.active { background: rgba(239,68,68,0.3); border-color: rgba(239,68,68,0.5); color: #fca5a5; }
+    #liveIndicator {
+      display: none; width: 7px; height: 7px; border-radius: 50%;
+      background: #ef4444; animation: blink 1s infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+    #liveWindowLabel {
+      display: none; font-size: 10px; color: rgba(255,255,255,0.4);
+      white-space: nowrap;
+    }
     .sep { width: 1px; height: 18px; background: rgba(255,255,255,0.1); margin: 0 3px; flex-shrink: 0; }
     .filter-btn {
       background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
@@ -45,9 +62,17 @@
 </head>
 <body>
   <div id="toolbar">
+    <!-- Modalità Match / Live -->
+    <button class="mode-btn active" id="modeMatch" onclick="setMode('match')">📊 Match</button>
+    <button class="mode-btn live" id="modeLive" onclick="setMode('live')">🔴 Live</button>
+    <div id="liveIndicator"></div>
+    <span id="liveWindowLabel">±15s</span>
+    <div class="sep"></div>
+    <!-- Tipo visualizzazione -->
     <button class="tab-btn active" id="tabHeatmap" onclick="setTab('heatmap')">🔥 Heatmap</button>
     <button class="tab-btn" id="tabPressing" onclick="setTab('pressing')">⚡ Pressing</button>
     <div class="sep"></div>
+    <!-- Filtri squadra / giocatore -->
     <button class="filter-btn active" id="fAll" onclick="setFilter('all')">Tutti</button>
     <button class="filter-btn" id="fA" onclick="setFilter('a')">Squadra A</button>
     <button class="filter-btn" id="fB" onclick="setFilter('b')">Squadra B</button>
@@ -63,14 +88,44 @@
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script>
     let backend = null;
-    let heatmapData = null;
+    let heatmapData = null;   // dati Match (aggregati su tutti i frame)
+    let playerTracks = null;  // raw tracks per modalità Live
     let currentTab = 'heatmap';
     let currentFilter = 'all';
     let currentPlayer = '';
+    let currentMode = 'match';  // 'match' | 'live'
+    let liveTimer = null;
+    const LIVE_WINDOW_MS = 15000;  // finestra ±15 secondi
+    const COLS = 40, ROWS = 26;
 
     const canvas = document.getElementById('heatmap-canvas');
     const ctx = canvas.getContext('2d');
     const overlayMsg = document.getElementById('overlay-msg');
+
+    // ── Mode (Match / Live) ───────────────────────────────────────────────────
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('modeMatch').classList.toggle('active', mode === 'match');
+      document.getElementById('modeLive').classList.toggle('active', mode === 'live');
+      const liveInd = document.getElementById('liveIndicator');
+      const liveLabel = document.getElementById('liveWindowLabel');
+      liveInd.style.display = mode === 'live' ? 'block' : 'none';
+      liveLabel.style.display = mode === 'live' ? 'inline' : 'none';
+
+      if (mode === 'live') {
+        // Pressing non disponibile in live (serve event engine, non posizione corrente)
+        if (currentTab === 'pressing') setTab('heatmap');
+        document.getElementById('tabPressing').style.opacity = '0.35';
+        document.getElementById('tabPressing').style.pointerEvents = 'none';
+        startLiveLoop();
+        loadPlayerTracks();
+      } else {
+        document.getElementById('tabPressing').style.opacity = '';
+        document.getElementById('tabPressing').style.pointerEvents = '';
+        stopLiveLoop();
+        render();
+      }
+    }
 
     // ── Tab / Filter ──────────────────────────────────────────────────────────
     function setTab(tab) {
@@ -84,9 +139,6 @@
       currentFilter = f;
       currentPlayer = '';
       document.getElementById('playerSelect').value = '';
-      ['fAll','fA','fB'].forEach(id =>
-        document.getElementById(id).classList.toggle('active', id === 'f' + f.charAt(0).toUpperCase() + f.slice(1))
-      );
       document.getElementById('fAll').classList.toggle('active', f === 'all');
       document.getElementById('fA').classList.toggle('active', f === 'a');
       document.getElementById('fB').classList.toggle('active', f === 'b');
@@ -102,7 +154,7 @@
       render();
     }
 
-    // ── Data loading ──────────────────────────────────────────────────────────
+    // ── Match data loading ────────────────────────────────────────────────────
     function loadData() {
       if (!backend || typeof backend.getHeatmapData !== 'function') return;
       backend.getHeatmapData(function(json) {
@@ -118,13 +170,92 @@
             sel.appendChild(opt);
           });
           sel.value = prev;
-          render();
+          if (currentMode === 'match') render();
         } catch(e) {}
       });
     }
 
+    // ── Live: load raw player tracks once ────────────────────────────────────
+    function loadPlayerTracks() {
+      if (!backend || typeof backend.getPlayerTracksJson !== 'function') return;
+      backend.getPlayerTracksJson(function(json) {
+        try { playerTracks = JSON.parse(json); } catch(e) { playerTracks = null; }
+      });
+    }
+
+    // ── Live loop: poll current position and recompute grid ───────────────────
+    function startLiveLoop() {
+      stopLiveLoop();
+      function tick() {
+        if (currentMode !== 'live') return;
+        if (!backend) { liveTimer = setTimeout(tick, 500); return; }
+        backend.getCurrentPositionMs(function(posMs) {
+          renderLive(posMs);
+          liveTimer = setTimeout(tick, 400);
+        });
+      }
+      tick();
+    }
+
+    function stopLiveLoop() {
+      if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+    }
+
+    // ── Live grid computation ─────────────────────────────────────────────────
+    function computeLiveGrid(posMs) {
+      const empty = () => { const g = []; for(let r=0;r<ROWS;r++){g.push(new Float32Array(COLS));} return g; };
+      if (!playerTracks || !playerTracks.frames) return { all: empty(), a: empty(), b: empty(), track: {} };
+
+      const fps = playerTracks.fps || 3.0;
+      const w = Math.max(1, playerTracks.width || 1280);
+      const h = Math.max(1, playerTracks.height || 720);
+      const frames = playerTracks.frames;
+      const windowFrames = Math.ceil(LIVE_WINDOW_MS / 1000 * fps);
+      const centerIdx = Math.round(posMs / 1000.0 * fps);
+      const startIdx = Math.max(0, centerIdx - windowFrames);
+      const endIdx = Math.min(frames.length - 1, centerIdx + windowFrames);
+
+      const all = empty(), gridA = empty(), gridB = empty();
+      const track = {};
+
+      for (let fi = startIdx; fi <= endIdx; fi++) {
+        const frame = frames[fi];
+        if (!frame) continue;
+        for (const det of (frame.detections || [])) {
+          if (det.role === 'ball' || det.role === 'goal' || det.role === 'referee') continue;
+          let xm, ym;
+          if (det.x_m !== undefined) {
+            xm = det.x_m / 105; ym = det.y_m / 68;
+          } else {
+            xm = (det.x + det.w * 0.5) / w;
+            ym = (det.y + det.h * 0.5) / h;
+          }
+          const col = Math.max(0, Math.min(COLS - 1, Math.floor(xm * COLS)));
+          const row = Math.max(0, Math.min(ROWS - 1, Math.floor(ym * ROWS)));
+          const team = det.team;
+          const tid = String(det.track_id ?? -1);
+          all[row][col]++;
+          if (team === 0) gridA[row][col]++;
+          else if (team === 1) gridB[row][col]++;
+          if (det.track_id >= 0) {
+            if (!track[tid]) { const g = empty(); track[tid] = g; }
+            track[tid][row][col]++;
+          }
+        }
+      }
+      return { all, a: gridA, b: gridB, track };
+    }
+
     // ── Grid selection ────────────────────────────────────────────────────────
-    function getActiveGrid() {
+    function getActiveGrid(liveGrids) {
+      if (currentMode === 'live') {
+        if (!liveGrids) return null;
+        if (currentPlayer && liveGrids.track) return liveGrids.track[currentPlayer] || null;
+        if (currentFilter === 'a') return liveGrids.a;
+        if (currentFilter === 'b') return liveGrids.b;
+        return liveGrids.all;
+      }
+      // match mode
       if (!heatmapData) return null;
       if (currentTab === 'pressing') {
         if (!heatmapData.has_pressing) return null;
@@ -132,15 +263,13 @@
         if (currentFilter === 'b') return heatmapData.pressing_b;
         return heatmapData.pressing_all;
       }
-      if (currentPlayer && heatmapData.track_grids) {
-        return heatmapData.track_grids[currentPlayer] || null;
-      }
+      if (currentPlayer && heatmapData.track_grids) return heatmapData.track_grids[currentPlayer] || null;
       if (currentFilter === 'a') return heatmapData.grid_a;
       if (currentFilter === 'b') return heatmapData.grid_b;
       return heatmapData.grid_all;
     }
 
-    // ── Color gradient (0→transparent, 0.3→blue, 0.6→yellow, 1→red) ─────────
+    // ── Color gradient ────────────────────────────────────────────────────────
     function heatColor(t) {
       if (t <= 0.01) return null;
       const alpha = Math.min(0.92, 0.3 + t * 0.7);
@@ -150,7 +279,7 @@
         r = 0; g = Math.round(p * 80); b = Math.round(120 + p * 135);
       } else if (t < 0.5) {
         const p = (t - 0.25) / 0.25;
-        r = Math.round(p * 0); g = Math.round(80 + p * 175); b = Math.round(255 - p * 255);
+        r = 0; g = Math.round(80 + p * 175); b = Math.round(255 - p * 255);
       } else if (t < 0.75) {
         const p = (t - 0.5) / 0.25;
         r = Math.round(p * 255); g = 255; b = 0;
@@ -171,7 +300,6 @@
       const { x0, y0, fw, fh } = getFieldBounds(W, H);
       ctx.fillStyle = '#1e6b30';
       ctx.fillRect(x0, y0, fw, fh);
-      // Alternating stripes
       const stripeW = fw / 10;
       for (let i = 0; i < 10; i++) {
         if (i % 2 === 0) {
@@ -185,53 +313,31 @@
       const { x0, y0, fw, fh } = getFieldBounds(W, H);
       ctx.strokeStyle = 'rgba(255,255,255,0.75)';
       ctx.lineWidth = 1.2;
-      // Outline
       ctx.strokeRect(x0 + 0.5, y0 + 0.5, fw - 1, fh - 1);
-      // Halfway line
-      ctx.beginPath();
-      ctx.moveTo(x0 + fw / 2, y0);
-      ctx.lineTo(x0 + fw / 2, y0 + fh);
-      ctx.stroke();
-      // Center circle (r = 9.15m / 105m * fw)
+      ctx.beginPath(); ctx.moveTo(x0 + fw / 2, y0); ctx.lineTo(x0 + fw / 2, y0 + fh); ctx.stroke();
       const cr = (9.15 / 105) * fw;
       if (cr > 2) {
-        ctx.beginPath();
-        ctx.arc(x0 + fw / 2, y0 + fh / 2, cr, 0, Math.PI * 2);
-        ctx.stroke();
-        // Center dot
-        ctx.beginPath();
-        ctx.arc(x0 + fw / 2, y0 + fh / 2, 2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(x0 + fw / 2, y0 + fh / 2, cr, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x0 + fw / 2, y0 + fh / 2, 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fill();
       }
-      // Penalty areas (16.5m wide, 40.3m tall)
-      const paW = (16.5 / 105) * fw;
-      const paH = (40.32 / 68) * fh;
-      const paTop = y0 + (fh - paH) / 2;
+      const paW = (16.5 / 105) * fw, paH = (40.32 / 68) * fh, paTop = y0 + (fh - paH) / 2;
       ctx.strokeRect(x0, paTop, paW, paH);
       ctx.strokeRect(x0 + fw - paW, paTop, paW, paH);
-      // Goal areas (5.5m wide, 18.32m tall)
-      const gaW = (5.5 / 105) * fw;
-      const gaH = (18.32 / 68) * fh;
-      const gaTop = y0 + (fh - gaH) / 2;
+      const gaW = (5.5 / 105) * fw, gaH = (18.32 / 68) * fh, gaTop = y0 + (fh - gaH) / 2;
       ctx.strokeRect(x0, gaTop, gaW, gaH);
       ctx.strokeRect(x0 + fw - gaW, gaTop, gaW, gaH);
-      // Penalty spots
       const pspot = (11 / 105) * fw;
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
-      ctx.beginPath();
-      ctx.arc(x0 + pspot, y0 + fh / 2, 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(x0 + fw - pspot, y0 + fh / 2, 2, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(x0 + pspot, y0 + fh / 2, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x0 + fw - pspot, y0 + fh / 2, 2, 0, Math.PI * 2); ctx.fill();
     }
 
     // ── Gaussian smoothing ────────────────────────────────────────────────────
     function gaussianSmooth(grid, radius) {
       const rows = grid.length;
       if (!rows) return grid;
-      const cols = grid[0].length;
+      const cols = (grid[0] && grid[0].length) || COLS;
       const out = [];
       for (let r = 0; r < rows; r++) {
         out.push(new Float32Array(cols));
@@ -241,9 +347,9 @@
             for (let dc = -radius; dc <= radius; dc++) {
               const nr = r + dr, nc = c + dc;
               if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-              const w = Math.exp(-(dr * dr + dc * dc) / (radius * radius));
-              sum += grid[nr][nc] * w;
-              weight += w;
+              const w = Math.exp(-(dr*dr + dc*dc) / (radius*radius));
+              const v = (grid[nr] && grid[nr][nc] !== undefined) ? Number(grid[nr][nc]) : 0;
+              sum += v * w; weight += w;
             }
           }
           out[r][c] = weight > 0 ? sum / weight : 0;
@@ -252,64 +358,26 @@
       return out;
     }
 
-    // ── Main render ───────────────────────────────────────────────────────────
-    function render() {
-      const W = canvas.width, H = canvas.height;
-      if (W < 4 || H < 4) return;
-
-      ctx.clearRect(0, 0, W, H);
-      drawFieldBackground(W, H);
-
-      // No data state
-      if (!heatmapData) {
-        drawFieldLines(W, H);
-        showMsg('Esegui prima l\'analisi automatica\nper vedere la heatmap.');
-        return;
-      }
-
-      // Pressing tab with no pressing events
-      if (currentTab === 'pressing' && !heatmapData.has_pressing) {
-        drawFieldLines(W, H);
-        showMsg('Nessun evento pressing rilevato\nnell\'analisi automatica.');
-        return;
-      }
-
-      const grid = getActiveGrid();
-      const COLS = heatmapData.cols || 40;
-      const ROWS = heatmapData.rows || 26;
-
-      // Check if grid has data
+    // ── Draw heatmap grid onto canvas ─────────────────────────────────────────
+    function drawGrid(grid, W, H) {
       let hasData = false;
       if (grid && grid.length) {
         for (let r = 0; r < grid.length && !hasData; r++)
           for (let c = 0; c < (grid[r] ? grid[r].length : 0) && !hasData; c++)
             if (grid[r][c] > 0) hasData = true;
       }
+      if (!hasData) return false;
 
-      if (!hasData) {
-        drawFieldLines(W, H);
-        showMsg(currentPlayer ? 'Nessun dato per questo giocatore.' : 'Nessun dato disponibile.');
-        return;
-      }
-
-      hideMsg();
-
-      // Smooth grid
       const smoothed = gaussianSmooth(grid, 2);
-
-      // Find max
       let maxVal = 0;
       for (let r = 0; r < ROWS; r++)
         for (let c = 0; c < COLS; c++)
           if (smoothed[r] && smoothed[r][c] > maxVal) maxVal = smoothed[r][c];
+      if (maxVal === 0) return false;
 
-      if (maxVal === 0) { drawFieldLines(W, H); return; }
-
-      // Draw heatmap cells
       const { x0, y0, fw, fh } = getFieldBounds(W, H);
       const cellW = fw / COLS + 0.5;
       const cellH = fh / ROWS + 0.5;
-
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
           if (!smoothed[r]) continue;
@@ -321,8 +389,62 @@
           ctx.fillRect(x0 + c * fw / COLS, y0 + r * fh / ROWS, cellW, cellH);
         }
       }
+      return true;
+    }
 
-      // Draw field lines on top (semi-transparent)
+    // ── Main render (Match mode) ──────────────────────────────────────────────
+    function render() {
+      const W = canvas.width, H = canvas.height;
+      if (W < 4 || H < 4) return;
+      ctx.clearRect(0, 0, W, H);
+      drawFieldBackground(W, H);
+
+      if (!heatmapData) {
+        drawFieldLines(W, H);
+        showMsg('Esegui prima l\'analisi automatica\nper vedere la heatmap.');
+        return;
+      }
+      if (currentTab === 'pressing' && !heatmapData.has_pressing) {
+        drawFieldLines(W, H);
+        showMsg('Nessun evento pressing rilevato\nnell\'analisi automatica.');
+        return;
+      }
+
+      const grid = getActiveGrid(null);
+      const hasData = drawGrid(grid, W, H);
+      if (!hasData) {
+        drawFieldLines(W, H);
+        showMsg(currentPlayer ? 'Nessun dato per questo giocatore.' : 'Nessun dato disponibile.');
+        return;
+      }
+      hideMsg();
+      ctx.globalAlpha = 0.65;
+      drawFieldLines(W, H);
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Live render ───────────────────────────────────────────────────────────
+    function renderLive(posMs) {
+      const W = canvas.width, H = canvas.height;
+      if (W < 4 || H < 4) return;
+      ctx.clearRect(0, 0, W, H);
+      drawFieldBackground(W, H);
+
+      if (!playerTracks || !playerTracks.frames) {
+        drawFieldLines(W, H);
+        showMsg('Caricamento tracks in corso...\nEsegui prima l\'analisi automatica.');
+        return;
+      }
+
+      const liveGrids = computeLiveGrid(posMs);
+      const grid = getActiveGrid(liveGrids);
+      const hasData = drawGrid(grid, W, H);
+      if (!hasData) {
+        drawFieldLines(W, H);
+        showMsg('Nessun giocatore rilevato\nnel frame corrente.');
+        return;
+      }
+      hideMsg();
       ctx.globalAlpha = 0.65;
       drawFieldLines(W, H);
       ctx.globalAlpha = 1;
@@ -332,9 +454,7 @@
       overlayMsg.style.display = 'block';
       overlayMsg.innerHTML = text.replace(/\n/g, '<br>');
     }
-    function hideMsg() {
-      overlayMsg.style.display = 'none';
-    }
+    function hideMsg() { overlayMsg.style.display = 'none'; }
 
     // ── Canvas resize ─────────────────────────────────────────────────────────
     function resizeCanvas() {
@@ -342,10 +462,9 @@
       const w = wrap.clientWidth || 1;
       const h = wrap.clientHeight || 1;
       if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
+        canvas.width = w; canvas.height = h;
       }
-      render();
+      if (currentMode === 'match') render();
     }
 
     window.addEventListener('resize', resizeCanvas);
@@ -356,8 +475,11 @@
     new QWebChannel(qt.webChannelTransport, function(channel) {
       backend = channel.objects.backend;
       loadData();
+      loadPlayerTracks();
       if (backend.videoLoaded) {
-        backend.videoLoaded.connect(function() { setTimeout(loadData, 600); });
+        backend.videoLoaded.connect(function() {
+          setTimeout(function() { loadData(); loadPlayerTracks(); }, 600);
+        });
       }
     });
   </script>
