@@ -5,9 +5,8 @@
 <title>Lavagna Tattica Interattiva</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#0B1220; font-family: Arial, sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; user-select:none; color:#e9f1ff; }
+body { background:#0B1220; font-family:Arial,sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; user-select:none; color:#e9f1ff; }
 
-/* ── TOOLBAR ── */
 #toolbar {
   display:flex; align-items:center; gap:5px; padding:5px 8px;
   background:#111827; border-bottom:1px solid #1e2d45; flex-shrink:0; flex-wrap:wrap;
@@ -17,85 +16,70 @@ body { background:#0B1220; font-family: Arial, sans-serif; display:flex; flex-di
 button.tb-btn {
   background:#1a2640; border:1px solid #2a3f5f; color:#9eb0c8;
   border-radius:5px; padding:3px 7px; font-size:11px; cursor:pointer; white-space:nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition:background .15s,color .15s;
 }
-button.tb-btn:hover { background:#243350; color:#e9f1ff; }
+button.tb-btn:hover  { background:#243350; color:#e9f1ff; }
 button.tb-btn.active { background:#1d4ed8; border-color:#3b82f6; color:#fff; }
 button.tb-btn.danger { border-color:#ef444460; color:#ef4444; }
-button.tb-btn.danger:hover { background:#3f1111; }
-button.tb-btn.success { border-color:#22c55e60; color:#22c55e; }
+button.tb-btn.danger:hover  { background:#3f1111; }
+button.tb-btn.success{ border-color:#22c55e60; color:#22c55e; }
 button.tb-btn.success:hover { background:#112811; }
-button.tb-btn.warning { border-color:#f59e0b60; color:#f59e0b; }
+button.tb-btn.warning{ border-color:#f59e0b60; color:#f59e0b; }
 button.tb-btn.warning:hover { background:#311e00; }
-.color-dot { width:18px; height:18px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:border 0.1s; }
-.color-dot:hover, .color-dot.active { border-color:#fff; }
+.color-dot { width:18px; height:18px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:border .1s; flex-shrink:0; }
+.color-dot:hover,.color-dot.active { border-color:#fff; }
+.size-btn { min-width:28px; text-align:center; font-weight:700; }
+.size-btn.active { background:#1d4ed8; border-color:#3b82f6; color:#fff; }
 
-/* ── MAIN ── */
 #main { display:flex; flex:1; overflow:hidden; }
 
-/* ── LEFT PANEL (strumenti) ── */
 #tools-panel {
-  width:72px; background:#0d1a2e; border-right:1px solid #1e2d45;
-  display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0;
-  padding:6px 4px; gap:4px;
+  width:76px; background:#0d1a2e; border-right:1px solid #1e2d45;
+  display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0; padding:6px 4px; gap:3px;
 }
-.tp-label { font-size:9px; color:#4a6080; text-align:center; margin:4px 0 2px; text-transform:uppercase; letter-spacing:0.4px; }
+.tp-label { font-size:9px; color:#4a6080; text-align:center; margin:4px 0 2px; text-transform:uppercase; letter-spacing:.4px; }
 .tool-item {
   display:flex; flex-direction:column; align-items:center; gap:2px;
   padding:5px 3px; border-radius:6px; cursor:pointer; border:1px solid transparent;
-  transition:background 0.12s, border 0.12s;
+  transition:background .12s,border .12s;
 }
-.tool-item:hover { background:#1a2640; border-color:#2a3f5f; }
+.tool-item:hover  { background:#1a2640; border-color:#2a3f5f; }
 .tool-item.active { background:#1d3a6e; border-color:#3b82f6; }
-.tool-item span.icon { font-size:20px; line-height:1; }
-.tool-item span.lbl { font-size:9px; color:#6a8aaa; text-align:center; line-height:1.2; }
+.tool-item canvas { display:block; }
+.tool-item span   { font-size:9px; color:#6a8aaa; text-align:center; line-height:1.2; }
 
-/* ── FIELD ── */
-#field-wrap { flex:1; display:flex; align-items:center; justify-content:center; padding:6px; position:relative; }
+#field-wrap { flex:1; display:flex; align-items:center; justify-content:center; padding:6px; }
 #field-canvas { display:block; }
 
-/* ── RIGHT PANEL (squadre) ── */
 #teams-panel {
-  width:150px; background:#0d1a2e; border-left:1px solid #1e2d45;
+  width:148px; background:#0d1a2e; border-left:1px solid #1e2d45;
   display:flex; flex-direction:column; overflow:hidden; flex-shrink:0;
 }
 .team-section { flex:1; overflow-y:auto; border-bottom:1px solid #1e2d45; padding:6px; }
-.team-title {
-  font-size:10px; font-weight:700; margin-bottom:6px; padding:3px 6px;
-  border-radius:4px; text-align:center;
-}
-.player-row {
-  display:flex; align-items:center; gap:5px; padding:3px 4px;
-  border-radius:4px; cursor:pointer; font-size:11px; color:#9eb0c8;
-  transition:background 0.1s;
-}
+.team-title { font-size:10px; font-weight:700; margin-bottom:6px; padding:3px 6px; border-radius:4px; text-align:center; }
+.player-row { display:flex; align-items:center; gap:5px; padding:3px 4px; border-radius:4px; cursor:pointer; font-size:11px; color:#9eb0c8; transition:background .1s; }
 .player-row:hover { background:#1a2640; }
-.player-row.on-field { color:#e9f1ff; }
-.p-dot {
-  width:18px; height:18px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.6);
-  display:flex; align-items:center; justify-content:center;
-  font-size:8px; font-weight:700; flex-shrink:0;
-}
+.p-dot { width:18px; height:18px; border-radius:50%; border:1.5px solid rgba(255,255,255,.6); display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; flex-shrink:0; }
 .p-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.p-num { font-size:9px; color:#4a6080; }
 
-/* ── ANIMATION BAR ── */
 #anim-bar {
   display:flex; align-items:center; gap:6px; padding:5px 10px;
   background:#111827; border-top:1px solid #1e2d45; flex-shrink:0;
 }
-#anim-timeline {
-  flex:1; height:6px; background:#1e2d45; border-radius:3px; cursor:pointer; position:relative;
-}
-#anim-progress { height:100%; background:#3b82f6; border-radius:3px; width:0%; transition:width 0.1s; }
+#anim-timeline { flex:1; height:8px; background:#1e2d45; border-radius:4px; cursor:pointer; position:relative; overflow:hidden; }
+#anim-progress { height:100%; background:linear-gradient(90deg,#1d4ed8,#3b82f6); border-radius:4px; width:0%; }
 #anim-frames { font-size:10px; color:#4a6080; white-space:nowrap; min-width:60px; }
+
+#size-hint {
+  position:absolute; bottom:44px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,.75); color:#fff; font-size:11px; padding:3px 10px;
+  border-radius:10px; pointer-events:none; opacity:0; transition:opacity .3s;
+}
 </style>
 </head>
 <body>
 
-<!-- TOOLBAR -->
 <div id="toolbar">
-  <!-- Moduli A -->
   <span class="tb-label">A:</span>
   <button class="tb-btn" onclick="applyFormation('4-4-2','A')">4-4-2</button>
   <button class="tb-btn" onclick="applyFormation('4-3-3','A')">4-3-3</button>
@@ -103,7 +87,6 @@ button.tb-btn.warning:hover { background:#311e00; }
   <button class="tb-btn" onclick="applyFormation('4-2-3-1','A')">4-2-3-1</button>
   <button class="tb-btn" onclick="applyFormation('5-3-2','A')">5-3-2</button>
   <div class="tb-sep"></div>
-  <!-- Moduli B -->
   <span class="tb-label">B:</span>
   <button class="tb-btn" onclick="applyFormation('4-4-2','B')">4-4-2</button>
   <button class="tb-btn" onclick="applyFormation('4-3-3','B')">4-3-3</button>
@@ -111,152 +94,108 @@ button.tb-btn.warning:hover { background:#311e00; }
   <button class="tb-btn" onclick="applyFormation('4-2-3-1','B')">4-2-3-1</button>
   <button class="tb-btn" onclick="applyFormation('5-3-2','B')">5-3-2</button>
   <div class="tb-sep"></div>
-  <!-- Strumenti disegno -->
-  <button class="tb-btn" id="tool-select"  onclick="setTool('select')">↖ Muovi</button>
-  <button class="tb-btn" id="tool-arrow"   onclick="setTool('arrow')">➜ Freccia</button>
-  <button class="tb-btn" id="tool-line"    onclick="setTool('line')">— Linea</button>
-  <button class="tb-btn" id="tool-circle"  onclick="setTool('circle')">◯ Cerchio</button>
-  <button class="tb-btn" id="tool-zone"    onclick="setTool('zone')">▭ Zona</button>
+  <button class="tb-btn" id="tool-select" onclick="setTool('select')">↖ Muovi</button>
+  <button class="tb-btn" id="tool-arrow"  onclick="setTool('arrow')">➜ Freccia</button>
+  <button class="tb-btn" id="tool-line"   onclick="setTool('line')">— Linea</button>
+  <button class="tb-btn" id="tool-circle" onclick="setTool('circle')">◯ Cerchio</button>
+  <button class="tb-btn" id="tool-zone"   onclick="setTool('zone')">▭ Zona</button>
   <div class="tb-sep"></div>
-  <!-- Colori -->
-  <div class="color-dot active" style="background:#facc15" onclick="setColor(this,'#facc15')" title="Giallo"></div>
-  <div class="color-dot" style="background:#f87171" onclick="setColor(this,'#f87171')" title="Rosso"></div>
-  <div class="color-dot" style="background:#60a5fa" onclick="setColor(this,'#60a5fa')" title="Blu"></div>
-  <div class="color-dot" style="background:#4ade80" onclick="setColor(this,'#4ade80')" title="Verde"></div>
-  <div class="color-dot" style="background:#ffffff" onclick="setColor(this,'#ffffff')" title="Bianco"></div>
+  <div class="color-dot active" style="background:#facc15" onclick="setColor(this,'#facc15')"></div>
+  <div class="color-dot" style="background:#f87171"  onclick="setColor(this,'#f87171')"></div>
+  <div class="color-dot" style="background:#60a5fa"  onclick="setColor(this,'#60a5fa')"></div>
+  <div class="color-dot" style="background:#4ade80"  onclick="setColor(this,'#4ade80')"></div>
+  <div class="color-dot" style="background:#ffffff"  onclick="setColor(this,'#ffffff')"></div>
   <div class="tb-sep"></div>
-  <!-- Azioni -->
+  <span class="tb-label">Dim:</span>
+  <button class="tb-btn size-btn" onclick="setSize(0.6,'S')">S</button>
+  <button class="tb-btn size-btn active" onclick="setSize(1.0,'M')">M</button>
+  <button class="tb-btn size-btn" onclick="setSize(1.5,'L')">L</button>
+  <button class="tb-btn size-btn" onclick="setSize(2.2,'XL')">XL</button>
+  <div class="tb-sep"></div>
   <button class="tb-btn danger"  onclick="clearDrawings()">🗑 Disegni</button>
   <button class="tb-btn danger"  onclick="resetAll()">↺ Reset</button>
   <button class="tb-btn success" onclick="exportPNG()">💾 PNG</button>
 </div>
 
-<!-- MAIN -->
 <div id="main">
-
-  <!-- LEFT: strumenti allenamento -->
   <div id="tools-panel">
     <div class="tp-label">Pedine</div>
     <div class="tool-item" onclick="setPlaceTool('player_A')" id="ptool-player_A" title="Pedina Team A">
-      <span class="icon">🔵</span><span class="lbl">Team A</span>
+      <canvas width="40" height="40" id="preview-player_A"></canvas><span>Team A</span>
     </div>
     <div class="tool-item" onclick="setPlaceTool('player_B')" id="ptool-player_B" title="Pedina Team B">
-      <span class="icon">🔴</span><span class="lbl">Team B</span>
+      <canvas width="40" height="40" id="preview-player_B"></canvas><span>Team B</span>
     </div>
-    <div class="tool-item" onclick="placeBallCenter()" title="Posiziona palla al centro">
-      <span class="icon">⚽</span><span class="lbl">Palla</span>
+    <div class="tool-item" onclick="placeBallCenter()" title="Palla al centro">
+      <canvas width="40" height="40" id="preview-ball"></canvas><span>Palla</span>
     </div>
-    <div class="tp-label">Campo</div>
-    <div class="tool-item" onclick="setPlaceTool('cone')" id="ptool-cone" title="Birillo/Cono">
-      <span class="icon">🔶</span><span class="lbl">Birillo</span>
+    <div class="tp-label">Attrezzi</div>
+    <div class="tool-item" onclick="setPlaceTool('cone')"       id="ptool-cone"       title="Birillo/Cono">
+      <canvas width="40" height="40" id="preview-cone"></canvas><span>Birillo</span>
     </div>
-    <div class="tool-item" onclick="setPlaceTool('cinesino')" id="ptool-cinesino" title="Cinesino">
-      <span class="icon">🟡</span><span class="lbl">Cinesino</span>
+    <div class="tool-item" onclick="setPlaceTool('cinesino')"   id="ptool-cinesino"   title="Cinesino">
+      <canvas width="40" height="40" id="preview-cinesino"></canvas><span>Cinesino</span>
     </div>
-    <div class="tool-item" onclick="setPlaceTool('mini_goal')" id="ptool-mini_goal" title="Porta piccola">
-      <span class="icon">🥅</span><span class="lbl">Porta</span>
+    <div class="tool-item" onclick="setPlaceTool('mini_goal')"  id="ptool-mini_goal"  title="Porta piccola">
+      <canvas width="40" height="40" id="preview-mini_goal"></canvas><span>Porta</span>
     </div>
-    <div class="tool-item" onclick="setPlaceTool('hurdle')" id="ptool-hurdle" title="Ostacolo/Hurdle">
-      <span class="icon">🟧</span><span class="lbl">Ostacolo</span>
+    <div class="tool-item" onclick="setPlaceTool('hurdle')"     id="ptool-hurdle"     title="Ostacolo">
+      <canvas width="40" height="40" id="preview-hurdle"></canvas><span>Ostacolo</span>
     </div>
-    <div class="tool-item" onclick="setPlaceTool('mannequin')" id="ptool-mannequin" title="Manichino">
-      <span class="icon">🧍</span><span class="lbl">Manichino</span>
+    <div class="tool-item" onclick="setPlaceTool('mannequin')"  id="ptool-mannequin"  title="Manichino">
+      <canvas width="40" height="40" id="preview-mannequin"></canvas><span>Manichino</span>
     </div>
-    <div class="tool-item" onclick="setPlaceTool('pole')" id="ptool-pole" title="Paletto">
-      <span class="icon">🔴</span><span class="lbl">Paletto</span>
+    <div class="tool-item" onclick="setPlaceTool('pole')"       id="ptool-pole"       title="Paletto">
+      <canvas width="40" height="40" id="preview-pole"></canvas><span>Paletto</span>
     </div>
     <div class="tool-item" onclick="setPlaceTool('extra_ball')" id="ptool-extra_ball" title="Pallone extra">
-      <span class="icon">⚪</span><span class="lbl">Pallone</span>
+      <canvas width="40" height="40" id="preview-extra_ball"></canvas><span>Pallone</span>
     </div>
-    <div class="tp-label">Cancella</div>
+    <div class="tp-label">Altro</div>
     <div class="tool-item" onclick="setTool('erase')" id="ptool-erase" title="Cancella elemento">
-      <span class="icon">🗑️</span><span class="lbl">Elimina</span>
+      <canvas width="40" height="40" id="preview-erase"></canvas><span>Elimina</span>
     </div>
   </div>
 
-  <!-- CENTER: campo -->
   <div id="field-wrap">
     <canvas id="field-canvas"></canvas>
+    <div id="size-hint"></div>
   </div>
 
-  <!-- RIGHT: squadre/giocatori -->
   <div id="teams-panel">
-    <div class="team-section" id="team-a-section">
-      <div class="team-title" id="team-a-title" style="background:rgba(59,130,246,0.2);color:#60a5fa">Team A</div>
+    <div class="team-section">
+      <div class="team-title" id="team-a-title" style="background:rgba(59,130,246,.2);color:#60a5fa">Team A</div>
       <div id="team-a-players"></div>
     </div>
-    <div class="team-section" id="team-b-section">
-      <div class="team-title" id="team-b-title" style="background:rgba(239,68,68,0.2);color:#f87171">Team B</div>
+    <div class="team-section">
+      <div class="team-title" id="team-b-title" style="background:rgba(239,68,68,.2);color:#f87171">Team B</div>
       <div id="team-b-players"></div>
     </div>
   </div>
-
 </div>
 
-<!-- ANIMATION BAR -->
 <div id="anim-bar">
-  <button class="tb-btn warning" id="btn-record" onclick="toggleRecord()">⏺ Registra frame</button>
-  <button class="tb-btn" id="btn-play" onclick="playAnimation()" disabled>▶ Play</button>
+  <button class="tb-btn warning" id="btn-record" onclick="recordFrame()">⏺ Registra frame</button>
+  <button class="tb-btn" id="btn-play" onclick="togglePlay()" disabled>▶ Play</button>
   <button class="tb-btn" onclick="clearKeyframes()">✕ Svuota</button>
-  <div id="anim-timeline" onclick="seekTimeline(event)">
-    <div id="anim-progress"></div>
-  </div>
+  <div id="anim-timeline" onclick="seekTimeline(event)"><div id="anim-progress"></div></div>
   <span id="anim-frames">0 frame</span>
   <span class="tb-label" style="margin-left:4px">Velocità:</span>
   <select id="anim-speed" style="background:#1a2640;color:#9eb0c8;border:1px solid #2a3f5f;border-radius:4px;padding:2px 4px;font-size:11px;cursor:pointer">
-    <option value="800">Lenta</option>
-    <option value="500" selected>Media</option>
-    <option value="250">Veloce</option>
+    <option value="3000">Molto lenta</option>
+    <option value="1800">Lenta</option>
+    <option value="900" selected>Media</option>
+    <option value="400">Veloce</option>
   </select>
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════════
-// COSTANTI CAMPO
-// ═══════════════════════════════════════════════════════════
-const FIELD_W = 105, FIELD_H = 68;
-
-const TEAMS_CFG = {
-  A: { color:'#3b82f6', label:'Team A' },
-  B: { color:'#ef4444', label:'Team B' }
-};
-
-// ═══════════════════════════════════════════════════════════
-// STATO
-// ═══════════════════════════════════════════════════════════
-let players     = [];  // { id, team, num, name, x, y }
-let equipment   = [];  // { id, type, x, y, angle:0 }
-let ball        = { x: FIELD_W/2, y: FIELD_H/2, visible:true };
-let drawings    = [];  // { type, color, ... }
-let currentDrawing = null;
-
-let currentTool  = 'select';
-let placeTool    = null;   // tool da piazzare (es. 'cone')
-let currentColor = '#facc15';
-
-// drag
-let dragObj    = null;   // { kind:'player'|'equipment'|'ball', ref }
-let dragOff    = {x:0, y:0};
-let drawStart  = null;
-
-// animazione
-let keyframes      = [];
-let isRecording    = false;
-let animPlaying    = false;
-let animTimer      = null;
-let animFrame      = 0;
-
-// dati squadre (iniettati da Python)
-let teamsData = { A: null, B: null };
-
-const canvas = document.getElementById('field-canvas');
-const ctx    = canvas.getContext('2d');
-let scale    = 1;
-
-// ═══════════════════════════════════════════════════════════
-// FORMAZIONI
-// ═══════════════════════════════════════════════════════════
-const FORMATIONS = {
+// ═══════════════════════════════════════════
+// COSTANTI
+// ═══════════════════════════════════════════
+const FW=105, FH=68;
+const TEAMS_CFG={ A:{color:'#3b82f6'}, B:{color:'#ef4444'} };
+const FORMATIONS={
   '4-4-2':   [[5,34],[12,15],[12,28],[12,42],[12,55],[35,12],[35,26],[35,42],[35,56],[68,26],[68,42]],
   '4-3-3':   [[5,34],[12,15],[12,28],[12,42],[12,55],[38,20],[38,34],[38,50],[72,14],[72,34],[72,54]],
   '3-5-2':   [[5,34],[15,20],[15,34],[15,50],[35,10],[35,23],[35,34],[35,46],[35,60],[65,26],[65,42]],
@@ -264,325 +203,369 @@ const FORMATIONS = {
   '5-3-2':   [[5,34],[12,10],[12,22],[12,34],[12,46],[12,58],[38,20],[38,34],[38,50],[65,26],[65,42]]
 };
 
-function mirrorFormation(coords) {
-  return coords.map(([x,y]) => [FIELD_W-x, FIELD_H-y]);
-}
+// ═══════════════════════════════════════════
+// STATO
+// ═══════════════════════════════════════════
+let players=[], equipment=[], ball={x:FW/2,y:FH/2}, drawings=[], currentDrawing=null;
+let currentTool='select', placeTool=null, currentColor='#facc15', currentSize=1.0;
+let dragObj=null, dragOff={x:0,y:0}, drawStart=null;
+let keyframes=[], animPlaying=false, animRafId=null;
+let animKeyIdx=0, animT=0;
+let teamsData={A:null,B:null};
+const canvas=document.getElementById('field-canvas');
+const ctx=canvas.getContext('2d');
+let scale=1;
 
-function applyFormation(name, team) {
-  const coords = FORMATIONS[name]; if (!coords) return;
-  const base   = team === 'A' ? coords : mirrorFormation(coords);
-  players = players.filter(p => p.team !== team);
-  const td = teamsData[team];
-  base.forEach(([x,y], i) => {
-    let name='', num=i+1;
-    if (td && td.players && td.players[i]) {
-      const p = td.players[i];
-      name = p.name || '';
-      num  = p.jersey_number != null ? p.jersey_number : i+1;
-    }
-    players.push({ id:`${team}${Date.now()}${i}`, team, num, name, x, y });
-  });
-  updateTeamPanel(team);
+// ═══════════════════════════════════════════
+// RESIZE
+// ═══════════════════════════════════════════
+function resizeCanvas(){
+  const wrap=document.getElementById('field-wrap');
+  const mw=wrap.clientWidth-12, mh=wrap.clientHeight-12;
+  const ratio=FW/FH;
+  let cw,ch;
+  if(mw/mh>ratio){ch=mh;cw=ch*ratio;}else{cw=mw;ch=cw/ratio;}
+  canvas.width=Math.floor(cw); canvas.height=Math.floor(ch); scale=cw/FW;
   render();
 }
+window.addEventListener('resize',resizeCanvas);
+window.addEventListener('load',()=>{
+  resizeCanvas();
+  applyFormation('4-4-2','A'); applyFormation('4-4-2','B');
+  setTool('select');
+  drawPreviews();
+});
 
-// ═══════════════════════════════════════════════════════════
-// PANNELLO SQUADRE
-// ═══════════════════════════════════════════════════════════
-function loadTeamsData(data) {
-  // Chiamato da Python dopo il caricamento pagina
-  if (data.A) { teamsData.A = data.A; updateTeamPanelFull('A'); }
-  if (data.B) { teamsData.B = data.B; updateTeamPanelFull('B'); }
-  // Aggiorna titoli
-  if (data.A && data.A.name) document.getElementById('team-a-title').textContent = data.A.name;
-  if (data.B && data.B.name) document.getElementById('team-b-title').textContent = data.B.name;
+// ═══════════════════════════════════════════
+// COORD
+// ═══════════════════════════════════════════
+const toC=(mx,my)=>[mx*scale,my*scale];
+const toF=(cx,cy)=>[cx/scale,cy/scale];
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const ease=(t)=>t<.5?2*t*t:-1+(4-2*t)*t;
+
+// ═══════════════════════════════════════════
+// FORMAZIONI
+// ═══════════════════════════════════════════
+function applyFormation(name,team){
+  const coords=FORMATIONS[name]; if(!coords)return;
+  const base=team==='A'?coords:coords.map(([x,y])=>[FW-x,FH-y]);
+  players=players.filter(p=>p.team!==team);
+  const td=teamsData[team];
+  base.forEach(([x,y],i)=>{
+    let nm='',num=i+1;
+    if(td&&td.players&&td.players[i]){nm=td.players[i].name||'';num=td.players[i].jersey_number??i+1;}
+    players.push({id:`${team}${Date.now()}${i}`,team,num,name:nm,x,y,size:1});
+  });
+  updateTeamPanel(team); render();
 }
 
-function updateTeamPanelFull(team) {
-  const td   = teamsData[team];
-  const cont = document.getElementById(`team-${team.toLowerCase()}-players`);
-  cont.innerHTML = '';
-  if (!td || !td.players) return;
-  td.players.forEach(p => {
-    const row   = document.createElement('div');
-    row.className = 'player-row';
-    row.title   = p.role || '';
-    const color = TEAMS_CFG[team].color;
-    const onField = players.some(pl => pl.team === team && pl.name === p.name);
-    row.innerHTML = `
-      <div class="p-dot" style="background:${color}">
-        <span style="font-size:8px;font-weight:700;color:#fff">${p.jersey_number ?? '?'}</span>
-      </div>
-      <span class="p-name">${p.name}</span>
-    `;
-    if (onField) row.classList.add('on-field');
+// ═══════════════════════════════════════════
+// PANNELLO SQUADRE
+// ═══════════════════════════════════════════
+function loadTeamsData(data){
+  if(data.A){teamsData.A=data.A;updateTeamPanelFull('A');if(data.A.name)document.getElementById('team-a-title').textContent=data.A.name;}
+  if(data.B){teamsData.B=data.B;updateTeamPanelFull('B');if(data.B.name)document.getElementById('team-b-title').textContent=data.B.name;}
+}
+function updateTeamPanelFull(team){
+  const td=teamsData[team], cont=document.getElementById(`team-${team.toLowerCase()}-players`);
+  cont.innerHTML=''; if(!td||!td.players)return;
+  td.players.forEach(p=>{
+    const row=document.createElement('div'); row.className='player-row';
+    row.innerHTML=`<div class="p-dot" style="background:${TEAMS_CFG[team].color}"><span style="font-size:8px;font-weight:700;color:#fff">${p.jersey_number??'?'}</span></div><span class="p-name">${p.name}</span>`;
     cont.appendChild(row);
   });
 }
+function updateTeamPanel(team){if(teamsData[team])updateTeamPanelFull(team);}
 
-function updateTeamPanel(team) {
-  if (teamsData[team]) updateTeamPanelFull(team);
-}
-
-// ═══════════════════════════════════════════════════════════
-// RESIZE
-// ═══════════════════════════════════════════════════════════
-function resizeCanvas() {
-  const wrap = document.getElementById('field-wrap');
-  const maxW = wrap.clientWidth  - 12;
-  const maxH = wrap.clientHeight - 12;
-  const ratio = FIELD_W / FIELD_H;
-  let cw, ch;
-  if (maxW/maxH > ratio) { ch=maxH; cw=ch*ratio; } else { cw=maxW; ch=cw/ratio; }
-  canvas.width  = Math.floor(cw);
-  canvas.height = Math.floor(ch);
-  scale = cw / FIELD_W;
-  render();
-}
-window.addEventListener('resize', resizeCanvas);
-window.addEventListener('load', () => {
-  resizeCanvas();
-  applyFormation('4-4-2','A');
-  applyFormation('4-4-2','B');
-  setTool('select');
-});
-
-// ═══════════════════════════════════════════════════════════
-// COORDINATE
-// ═══════════════════════════════════════════════════════════
-function toC(mx,my)  { return [mx*scale, my*scale]; }
-function toF(cx,cy)  { return [cx/scale, cy/scale]; }
-function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
-function rect(c,cb)  { return c.getBoundingClientRect(); }
-
-// ═══════════════════════════════════════════════════════════
-// RENDER
-// ═══════════════════════════════════════════════════════════
-function render() {
-  const W=canvas.width, H=canvas.height;
+// ═══════════════════════════════════════════
+// RENDER PRINCIPALE
+// ═══════════════════════════════════════════
+function render(){
+  const W=canvas.width,H=canvas.height;
   ctx.clearRect(0,0,W,H);
   drawField(W,H);
-  drawings.forEach(d => renderShape(d));
-  if (currentDrawing) renderShape(currentDrawing);
-  equipment.forEach(e => drawEquipment(e));
-  players.forEach(p => drawPlayer(p));
-  if (ball.visible) drawBall(ball.x, ball.y, false);
+  drawings.forEach(d=>renderShape(d));
+  if(currentDrawing)renderShape(currentDrawing);
+  equipment.forEach(e=>drawEquipment(e));
+  players.forEach(p=>drawPlayer(p));
+  drawBall(ball.x,ball.y,1.0);
 }
 
-// ── Campo ───────────────────────────────────────────────────
-function drawField(W,H) {
-  // Strisce
-  const stripes=8;
-  for (let i=0;i<stripes;i++) {
-    ctx.fillStyle = i%2===0 ? '#1e5a1e' : '#1a4e1a';
-    ctx.fillRect(i*(W/stripes),0,W/stripes,H);
+// ── CAMPO ──────────────────────────────────
+function drawField(W,H){
+  const ns=10;
+  for(let i=0;i<ns;i++){
+    ctx.fillStyle=i%2===0?'#1e5a1e':'#1a4e1a';
+    ctx.fillRect(i*(W/ns),0,W/ns,H);
   }
-  ctx.strokeStyle='rgba(255,255,255,0.85)';
-  ctx.lineWidth=Math.max(1,scale*0.13);
+  ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=Math.max(1,scale*.13);
   ctx.strokeRect(0,0,W,H);
-  // Centrocampo
-  ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
-  // Cerchio
-  ctx.beginPath(); ctx.arc(W/2,H/2,9.15*scale,0,Math.PI*2); ctx.stroke();
-  ctx.fillStyle='rgba(255,255,255,0.85)';
-  ctx.beginPath(); ctx.arc(W/2,H/2,2.5,0,Math.PI*2); ctx.fill();
-  // Aree grandi
-  const aW=16.5*scale, aH=40.32*scale, aY=(H-aH)/2;
-  ctx.strokeRect(0,aY,aW,aH); ctx.strokeRect(W-aW,aY,aW,aH);
-  // Aree piccole
-  const sW=5.5*scale, sH=18.32*scale, sY=(H-sH)/2;
-  ctx.strokeRect(0,sY,sW,sH); ctx.strokeRect(W-sW,sY,sW,sH);
-  // Dischetti
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.beginPath();ctx.arc(W/2,H/2,9.15*scale,0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,.9)';
+  ctx.beginPath();ctx.arc(W/2,H/2,2.5,0,Math.PI*2);ctx.fill();
+  const aW=16.5*scale,aH=40.32*scale,aY=(H-aH)/2;
+  ctx.strokeRect(0,aY,aW,aH);ctx.strokeRect(W-aW,aY,aW,aH);
+  const sW=5.5*scale,sH=18.32*scale,sY=(H-sH)/2;
+  ctx.strokeRect(0,sY,sW,sH);ctx.strokeRect(W-sW,sY,sW,sH);
   const pk=11*scale;
-  ctx.fillStyle='rgba(255,255,255,0.85)';
-  ctx.beginPath(); ctx.arc(pk,H/2,2.5,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(W-pk,H/2,2.5,0,Math.PI*2); ctx.fill();
-  // Archi area
-  ctx.beginPath(); ctx.arc(pk,H/2,9.15*scale,-Math.PI*0.29,Math.PI*0.29); ctx.stroke();
-  ctx.beginPath(); ctx.arc(W-pk,H/2,9.15*scale,Math.PI*0.71,Math.PI*1.29); ctx.stroke();
-  // Porte
-  const gW=2.44*scale, gH=7.32*scale, gY=(H-gH)/2;
-  ctx.strokeRect(-gW,gY,gW,gH); ctx.strokeRect(W,gY,gW,gH);
-  // Angoli
-  const ar=1*scale;
-  ctx.beginPath(); ctx.arc(0,0,ar,0,Math.PI/2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(W,0,ar,Math.PI/2,Math.PI); ctx.stroke();
-  ctx.beginPath(); ctx.arc(0,H,ar,-Math.PI/2,0); ctx.stroke();
-  ctx.beginPath(); ctx.arc(W,H,ar,Math.PI,Math.PI*1.5); ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,.9)';
+  [pk,W-pk].forEach(x=>{ctx.beginPath();ctx.arc(x,H/2,2.5,0,Math.PI*2);ctx.fill();});
+  ctx.beginPath();ctx.arc(pk,H/2,9.15*scale,-Math.PI*.29,Math.PI*.29);ctx.stroke();
+  ctx.beginPath();ctx.arc(W-pk,H/2,9.15*scale,Math.PI*.71,Math.PI*1.29);ctx.stroke();
+  const gW=2.44*scale,gH=7.32*scale,gY=(H-gH)/2;
+  ctx.strokeRect(-gW,gY,gW,gH);ctx.strokeRect(W,gY,gW,gH);
+  const ar=scale;
+  [[0,0,0,Math.PI/2],[W,0,Math.PI/2,Math.PI],[0,H,-Math.PI/2,0],[W,H,Math.PI,Math.PI*1.5]]
+    .forEach(([x,y,s,e])=>{ctx.beginPath();ctx.arc(x,y,ar,s,e);ctx.stroke();});
 }
 
-// ── Pedine ─────────────────────────────────────────────────
-function drawPlayer(p) {
-  const [cx,cy]=toC(p.x,p.y);
-  const r=Math.max(10,scale*1.1);
-  const color=TEAMS_CFG[p.team].color;
-  ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=5;
-  ctx.fillStyle=color;
-  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
-  ctx.shadowBlur=0;
-  ctx.strokeStyle='#fff'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-  ctx.fillStyle='#fff';
-  ctx.font=`bold ${Math.max(8,r*0.85)}px Arial`;
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(String(p.num), cx, cy);
-  // Nome sotto (se disponibile e campo abbastanza grande)
-  if (p.name && scale > 3) {
-    ctx.font=`${Math.max(7,scale*0.6)}px Arial`;
-    ctx.fillStyle='rgba(255,255,255,0.8)';
-    ctx.fillText(p.name.split(' ').pop(), cx, cy+r+7);
-  }
-}
-
-// ── Pallone (bianco/nero realistico) ──────────────────────
-function drawBall(mx, my, small=false) {
+// ── PALLONE REALISTICO ─────────────────────
+function drawBall(mx,my,sz){
   const [cx,cy]=toC(mx,my);
-  const r=small ? Math.max(5,scale*0.55) : Math.max(7,scale*0.78);
-  ctx.shadowColor='rgba(0,0,0,0.6)'; ctx.shadowBlur=6;
-  // Base bianca
-  ctx.fillStyle='#f5f5f5';
-  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
-  ctx.shadowBlur=0;
-  ctx.strokeStyle='#222'; ctx.lineWidth=Math.max(0.5,r*0.07);
-  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-  // Pentagono centrale nero
+  const r=Math.max(7,scale*.82)*sz;
+  ctx.save();
+  // Ombra
+  ctx.shadowColor='rgba(0,0,0,.55)'; ctx.shadowBlur=r*.7; ctx.shadowOffsetX=r*.25; ctx.shadowOffsetY=r*.25;
+  ctx.fillStyle='#f0f0f0';
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;ctx.shadowOffsetX=0;ctx.shadowOffsetY=0;
+  // Clip dentro il cerchio
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+  // Pentagoni neri
   ctx.fillStyle='#111';
-  drawPolygon(cx,cy,r*0.32,5,-Math.PI/2);
-  ctx.fill();
-  // 5 patch nere esterne
-  for (let i=0;i<5;i++) {
-    const ang=(i*2*Math.PI/5)-Math.PI/2;
-    const px=cx+Math.cos(ang)*r*0.58;
-    const py=cy+Math.sin(ang)*r*0.58;
-    drawPolygon(px,py,r*0.23,5,ang+Math.PI+Math.PI/5);
-    ctx.fill();
+  // Centrale
+  pentPath(cx,cy,r*.30,5,-Math.PI/2);ctx.fill();
+  // 5 periferici
+  for(let i=0;i<5;i++){
+    const a=(i*72-90)*Math.PI/180;
+    const px=cx+Math.cos(a)*r*.57, py=cy+Math.sin(a)*r*.57;
+    pentPath(px,py,r*.22,5,a+Math.PI+36*Math.PI/180);ctx.fill();
   }
+  // Highlight lucido
+  const g=ctx.createRadialGradient(cx-r*.32,cy-r*.32,r*.04,cx-r*.1,cy-r*.1,r*.9);
+  g.addColorStop(0,'rgba(255,255,255,.55)');
+  g.addColorStop(.35,'rgba(255,255,255,.12)');
+  g.addColorStop(1,'rgba(0,0,0,.1)');
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+  // Bordo
+  ctx.strokeStyle='#333'; ctx.lineWidth=Math.max(.6,r*.06);
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
 }
-function drawPolygon(cx,cy,r,sides,startAngle) {
+function pentPath(cx,cy,r,sides,a0){
   ctx.beginPath();
-  for (let i=0;i<sides;i++) {
-    const a=startAngle+(i*2*Math.PI/sides);
-    i===0 ? ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a))
-           : ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));
-  }
+  for(let i=0;i<sides;i++){const a=a0+i*2*Math.PI/sides;i?ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a));}
   ctx.closePath();
 }
 
-// ── Attrezzatura ───────────────────────────────────────────
-function drawEquipment(e) {
-  const [cx,cy]=toC(e.x,e.y);
+// ── PEDINE ─────────────────────────────────
+function drawPlayer(p){
+  const [cx,cy]=toC(p.x,p.y);
+  const r=Math.max(10,scale*1.1)*(p.size||1);
+  const col=TEAMS_CFG[p.team].color;
   ctx.save();
-  ctx.translate(cx,cy);
-  const s=Math.max(8,scale*0.9);
-  switch(e.type) {
-    case 'cone': drawCone(s); break;
-    case 'cinesino': drawCinesino(s); break;
-    case 'mini_goal': drawMiniGoal(s); break;
-    case 'hurdle': drawHurdle(s); break;
-    case 'mannequin': drawMannequin(s); break;
-    case 'pole': drawPole(s); break;
-    case 'extra_ball': ctx.translate(-cx,-cy); drawBall(e.x,e.y,true); ctx.translate(cx,cy); break;
+  ctx.shadowColor='rgba(0,0,0,.5)'; ctx.shadowBlur=5;
+  const g=ctx.createRadialGradient(cx-r*.3,cy-r*.3,1,cx,cy,r);
+  g.addColorStop(0,lighten(col,.4)); g.addColorStop(1,col);
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=1.8;
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(8,r*.88)}px Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(String(p.num),cx,cy+.5);
+  if(p.name&&scale>3.5){
+    ctx.font=`${Math.max(7,scale*.58)}px Arial`; ctx.fillStyle='rgba(255,255,255,.82)';
+    ctx.fillText(p.name.split(' ').pop(),cx,cy+r+7);
+  }
+  ctx.restore();
+}
+function lighten(hex,f){
+  let r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  r=Math.min(255,Math.round(r+(255-r)*f)); g=Math.min(255,Math.round(g+(255-g)*f)); b=Math.min(255,Math.round(b+(255-b)*f));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ── ATTREZZATURA ───────────────────────────
+function drawEquipment(e){
+  const [cx,cy]=toC(e.x,e.y); const sz=(e.size||1); const s=Math.max(8,scale*.92)*sz;
+  ctx.save(); ctx.translate(cx,cy);
+  switch(e.type){
+    case 'cone':      drawCone(s);break;
+    case 'cinesino':  drawCinesino(s);break;
+    case 'mini_goal': drawMiniGoal(s);break;
+    case 'hurdle':    drawHurdle(s);break;
+    case 'mannequin': drawMannequin(s);break;
+    case 'pole':      drawPole(s);break;
+    case 'extra_ball':ctx.restore();drawBall(e.x,e.y,sz*.8);return;
   }
   ctx.restore();
 }
 
-function drawCone(s) {
-  // Cono arancione visto dall'alto = triangolo isoscele
-  ctx.fillStyle='#f97316';
-  ctx.strokeStyle='#c2410c'; ctx.lineWidth=1;
+function drawCone(s){
+  // Base ellittica arancione
+  ctx.shadowColor='rgba(0,0,0,.4)'; ctx.shadowBlur=s*.4; ctx.shadowOffsetY=s*.3;
+  const g=ctx.createRadialGradient(-s*.15,-s*.15,1,0,0,s);
+  g.addColorStop(0,'#fb923c'); g.addColorStop(1,'#c2410c');
+  ctx.fillStyle=g;
+  // Forma cono dall'alto: triangolo con base arrotondata
   ctx.beginPath();
-  ctx.moveTo(0,-s);
-  ctx.lineTo(-s*0.7,s*0.5);
-  ctx.lineTo(s*0.7,s*0.5);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.fillStyle='#fed7aa';
-  ctx.beginPath(); ctx.ellipse(0,s*0.5,s*0.7,s*0.2,0,0,Math.PI*2); ctx.fill();
+  ctx.moveTo(0,-s*.9);
+  ctx.quadraticCurveTo(s*.7,s*.3,s*.5,s*.6);
+  ctx.quadraticCurveTo(0,s*.85,-s*.5,s*.6);
+  ctx.quadraticCurveTo(-s*.7,s*.3,0,-s*.9);
+  ctx.fill();
+  ctx.shadowBlur=0; ctx.shadowOffsetY=0;
+  // Linee bianche orizzontali
+  ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=Math.max(.8,s*.07);
+  for(let i=0;i<2;i++){const y=-s*.2+i*s*.3; const w=s*(.2+i*.25);
+    ctx.beginPath();ctx.moveTo(-w,y);ctx.lineTo(w,y);ctx.stroke();}
+  // Punta bianca
+  ctx.fillStyle='rgba(255,255,255,.5)';
+  ctx.beginPath();ctx.arc(0,-s*.75,s*.1,0,Math.PI*2);ctx.fill();
 }
 
-function drawCinesino(s) {
-  // Disco piatto giallo
-  ctx.fillStyle='#facc15';
-  ctx.strokeStyle='#ca8a04'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.ellipse(0,0,s,s*0.35,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle='rgba(255,255,255,0.3)';
-  ctx.beginPath(); ctx.ellipse(-s*0.2,-s*0.08,s*0.25,s*0.1,0,0,Math.PI*2); ctx.fill();
+function drawCinesino(s){
+  // Disco piatto giallo con ombra
+  ctx.shadowColor='rgba(0,0,0,.35)'; ctx.shadowBlur=s*.3; ctx.shadowOffsetY=s*.2;
+  const g=ctx.createRadialGradient(-s*.2,-s*.1,1,0,0,s);
+  g.addColorStop(0,'#fde047'); g.addColorStop(.7,'#facc15'); g.addColorStop(1,'#ca8a04');
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.ellipse(0,s*.1,s*.75,s*.28,0,0,Math.PI*2); ctx.fill();
+  ctx.shadowBlur=0; ctx.shadowOffsetY=0;
+  // Highlight
+  ctx.fillStyle='rgba(255,255,255,.35)';
+  ctx.beginPath(); ctx.ellipse(-s*.18,-s*.05,s*.28,s*.1,-.3,0,Math.PI*2); ctx.fill();
+  // Bordo
+  ctx.strokeStyle='rgba(161,107,6,.7)'; ctx.lineWidth=Math.max(.5,s*.05);
+  ctx.beginPath(); ctx.ellipse(0,s*.1,s*.75,s*.28,0,0,Math.PI*2); ctx.stroke();
 }
 
-function drawMiniGoal(s) {
-  // Porta piccola vista dall'alto
-  ctx.strokeStyle='#ffffff'; ctx.lineWidth=Math.max(1.5,s*0.15);
-  ctx.lineCap='round';
-  ctx.beginPath();
-  ctx.moveTo(-s*1.2,-s*0.4);
-  ctx.lineTo(-s*1.2, s*0.4);
-  ctx.moveTo( s*1.2,-s*0.4);
-  ctx.lineTo( s*1.2, s*0.4);
-  ctx.moveTo(-s*1.2,-s*0.4);
-  ctx.lineTo( s*1.2,-s*0.4);
-  ctx.stroke();
-  // Rete (linee diagonali)
-  ctx.strokeStyle='rgba(200,200,200,0.4)'; ctx.lineWidth=0.7;
-  for (let i=-3;i<=3;i++) {
-    ctx.beginPath(); ctx.moveTo(i*s*0.4,-s*0.4); ctx.lineTo(i*s*0.4,s*0); ctx.stroke();
-  }
+function drawMiniGoal(s){
+  const lw=Math.max(1.5,s*.18);
+  // Post verticali
+  ctx.strokeStyle='#e5e7eb'; ctx.lineWidth=lw; ctx.lineCap='round';
+  // Struttura porta dall'alto (U aperta verso il basso = verso il gioco)
+  // Traversa (in cima)
+  ctx.beginPath();ctx.moveTo(-s*1.3,-s*.05);ctx.lineTo(s*1.3,-s*.05);ctx.stroke();
+  // Post sinistro
+  ctx.beginPath();ctx.moveTo(-s*1.3,-s*.05);ctx.lineTo(-s*1.3,s*.55);ctx.stroke();
+  // Post destro
+  ctx.beginPath();ctx.moveTo(s*1.3,-s*.05);ctx.lineTo(s*1.3,s*.55);ctx.stroke();
+  // Fondo rete
+  ctx.strokeStyle='rgba(200,200,200,.5)'; ctx.lineWidth=Math.max(.6,lw*.35);
+  // Linee verticali rete
+  for(let i=-4;i<=4;i++){const x=i*s*.3;
+    ctx.beginPath();ctx.moveTo(x,-s*.05);ctx.lineTo(x,s*.55);ctx.stroke();}
+  // Linee orizzontali rete
+  for(let j=0;j<3;j++){const y=j*s*.2;
+    ctx.beginPath();ctx.moveTo(-s*1.3,y);ctx.lineTo(s*1.3,y);ctx.stroke();}
+  // Pali con ombra 3D
+  ctx.fillStyle='rgba(255,255,255,.2)';
+  ctx.fillRect(-s*1.3-lw/2,-s*.05,lw,s*.6);
+  ctx.fillRect(s*1.3-lw/2,-s*.05,lw,s*.6);
 }
 
-function drawHurdle(s) {
-  // Ostacolo rosso/giallo
-  ctx.fillStyle='#ef4444';
-  ctx.strokeStyle='#991b1b'; ctx.lineWidth=1;
-  ctx.fillRect(-s,-s*0.25,s*2,s*0.5);
-  ctx.strokeRect(-s,-s*0.25,s*2,s*0.5);
-  // Strisce gialle
-  ctx.fillStyle='#facc15';
-  for (let i=0;i<3;i++) {
-    ctx.fillRect(-s+i*s*0.65,  -s*0.25, s*0.28, s*0.5);
-  }
-}
-
-function drawMannequin(s) {
-  // Manichino giallo (cerchio corpo + testa)
-  ctx.fillStyle='#facc15'; ctx.strokeStyle='#a16207'; ctx.lineWidth=1.2;
-  // Corpo
-  ctx.beginPath(); ctx.ellipse(0,s*0.2,s*0.5,s*0.7,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  // Testa
-  ctx.fillStyle='#fef08a';
-  ctx.beginPath(); ctx.arc(0,-s*0.55,s*0.3,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  // X sul corpo
-  ctx.strokeStyle='rgba(100,70,0,0.5)'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(-s*0.3,-s*0.1); ctx.lineTo(s*0.3,s*0.5); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(s*0.3,-s*0.1); ctx.lineTo(-s*0.3,s*0.5); ctx.stroke();
-}
-
-function drawPole(s) {
-  // Paletto rosso
-  ctx.fillStyle='#ef4444'; ctx.strokeStyle='#7f1d1d'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.ellipse(0,0,s*0.3,s*0.3,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  // Linea verticale
-  ctx.strokeStyle='#ef4444'; ctx.lineWidth=Math.max(2,s*0.25);
-  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-s*1.5); ctx.stroke();
-  // Striscia bianca
-  ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(1,s*0.1);
-  ctx.beginPath(); ctx.moveTo(0,-s*0.4); ctx.lineTo(0,-s*0.8); ctx.stroke();
-}
-
-// ── Disegni ─────────────────────────────────────────────────
-function renderShape(d) {
-  const lw=Math.max(2,scale*0.18);
+function drawHurdle(s){
   ctx.save();
-  if (d.type==='arrow') {
+  // Gambe
+  ctx.strokeStyle='#6b7280'; ctx.lineWidth=Math.max(1,s*.1); ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(-s*.8,s*.15);ctx.lineTo(-s*.6,-s*.05);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(s*.8,s*.15);ctx.lineTo(s*.6,-s*.05);ctx.stroke();
+  // Barra principale (a strisce rosse/bianche)
+  const bH=s*.28, bW=s*1.8;
+  ctx.fillStyle='#fff'; ctx.strokeStyle='#9ca3af'; ctx.lineWidth=.5;
+  ctx.fillRect(-bW/2,-bH/2,bW,bH);
+  // Strisce rosse
+  const ns=5; const sw=bW/ns;
+  ctx.fillStyle='#ef4444';
+  for(let i=0;i<ns;i+=2)ctx.fillRect(-bW/2+i*sw,-bH/2,sw,bH);
+  ctx.strokeRect(-bW/2,-bH/2,bW,bH);
+  ctx.restore();
+}
+
+function drawMannequin(s){
+  ctx.save();
+  // Ombra
+  ctx.shadowColor='rgba(0,0,0,.4)'; ctx.shadowBlur=s*.35; ctx.shadowOffsetY=s*.25;
+  // Corpo ovale
+  const bg=ctx.createRadialGradient(-s*.2,-s*.1,1,0,s*.1,s*.8);
+  bg.addColorStop(0,'#fef08a'); bg.addColorStop(1,'#eab308');
+  ctx.fillStyle=bg;
+  ctx.beginPath();ctx.ellipse(0,s*.15,s*.45,s*.68,0,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+  // Testa
+  const hg=ctx.createRadialGradient(-s*.08,-s*.08,1,0,0,s*.32);
+  hg.addColorStop(0,'#fef9c3'); hg.addColorStop(1,'#fde047');
+  ctx.fillStyle=hg;
+  ctx.beginPath();ctx.arc(0,-s*.58,s*.3,0,Math.PI*2);ctx.fill();
+  // Collo
+  ctx.fillStyle='#fde047';
+  ctx.fillRect(-s*.1,-s*.3,s*.2,s*.2);
+  // Braccia
+  ctx.strokeStyle='#eab308'; ctx.lineWidth=s*.18; ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(-s*.42,-s*.1);ctx.lineTo(-s*.7,s*.25);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(s*.42,-s*.1);ctx.lineTo(s*.7,s*.25);ctx.stroke();
+  // Dettaglio viso
+  ctx.fillStyle='#1c1917';
+  ctx.beginPath();ctx.arc(-s*.1,-s*.62,s*.05,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(s*.1,-s*.62,s*.05,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+
+function drawPole(s){
+  ctx.save();
+  // Ombra
+  ctx.shadowColor='rgba(0,0,0,.5)'; ctx.shadowBlur=s*.3;
+  // Base circolare
+  const bg=ctx.createRadialGradient(-s*.1,-s*.1,1,0,0,s*.35);
+  bg.addColorStop(0,'#d1d5db'); bg.addColorStop(1,'#6b7280');
+  ctx.fillStyle=bg;
+  ctx.beginPath();ctx.ellipse(s*.05,s*.6,s*.3,s*.12,0,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  // Paletto verticale (strisce rosse/bianche)
+  const pw=s*.18, ph=s*1.5;
+  ctx.save();
+  ctx.beginPath();ctx.rect(-pw/2,-ph+s*.5,pw,ph);ctx.clip();
+  const ns=6; const sh=ph/ns;
+  for(let i=0;i<ns;i++){
+    ctx.fillStyle=i%2===0?'#ef4444':'#f1f5f9';
+    ctx.fillRect(-pw/2,-ph+s*.5+i*sh,pw,sh);
+  }
+  ctx.restore();
+  // Bordo paletto
+  ctx.strokeStyle='#9ca3af'; ctx.lineWidth=.5;
+  ctx.strokeRect(-pw/2,-ph+s*.5,pw,ph);
+  ctx.restore();
+}
+
+// ── DISEGNI ────────────────────────────────
+function renderShape(d){
+  const lw=Math.max(2,scale*.18); ctx.save();
+  if(d.type==='arrow'){
     const [x1,y1]=toC(d.x1,d.y1),[x2,y2]=toC(d.x2,d.y2);
-    drawArrow(x1,y1,x2,y2,d.color,lw);
-  } else if (d.type==='line') {
+    ctx.strokeStyle=d.color; ctx.fillStyle=d.color; ctx.lineWidth=lw;
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    const a=Math.atan2(y2-y1,x2-x1),al=Math.max(10,lw*4);
+    ctx.beginPath();ctx.moveTo(x2,y2);
+    ctx.lineTo(x2-al*Math.cos(a-.4),y2-al*Math.sin(a-.4));
+    ctx.lineTo(x2-al*Math.cos(a+.4),y2-al*Math.sin(a+.4));
+    ctx.closePath();ctx.fill();
+  } else if(d.type==='line'){
     const [x1,y1]=toC(d.x1,d.y1),[x2,y2]=toC(d.x2,d.y2);
     ctx.strokeStyle=d.color; ctx.lineWidth=lw; ctx.setLineDash([6,4]);
-    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
     ctx.setLineDash([]);
-  } else if (d.type==='circle') {
-    const [cx,cy]=toC(d.cx,d.cy);
+  } else if(d.type==='circle'){
+    const [cx2,cy2]=toC(d.cx,d.cy);
     ctx.strokeStyle=d.color; ctx.lineWidth=lw;
-    ctx.beginPath(); ctx.arc(cx,cy,Math.abs(d.r*scale),0,Math.PI*2); ctx.stroke();
-  } else if (d.type==='zone') {
+    ctx.beginPath();ctx.arc(cx2,cy2,Math.abs(d.r*scale),0,Math.PI*2);ctx.stroke();
+  } else if(d.type==='zone'){
     const [x1,y1]=toC(d.x1,d.y1),[x2,y2]=toC(d.x2,d.y2);
     ctx.fillStyle=d.color+'33'; ctx.strokeStyle=d.color; ctx.lineWidth=lw;
     ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));
@@ -591,272 +574,314 @@ function renderShape(d) {
   ctx.restore();
 }
 
-function drawArrow(x1,y1,x2,y2,color,lw) {
-  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=lw;
-  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-  const angle=Math.atan2(y2-y1,x2-x1), aLen=Math.max(10,lw*4);
-  ctx.beginPath();
-  ctx.moveTo(x2,y2);
-  ctx.lineTo(x2-aLen*Math.cos(angle-0.4),y2-aLen*Math.sin(angle-0.4));
-  ctx.lineTo(x2-aLen*Math.cos(angle+0.4),y2-aLen*Math.sin(angle+0.4));
-  ctx.closePath(); ctx.fill();
-}
-
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════
 // HIT TEST
-// ═══════════════════════════════════════════════════════════
-function hitPlayer(cx,cy) {
-  const r=Math.max(10,scale*1.1)+4;
-  for (let i=players.length-1;i>=0;i--) {
+// ═══════════════════════════════════════════
+function hitPlayer(cx,cy){
+  const base=Math.max(10,scale*1.1);
+  for(let i=players.length-1;i>=0;i--){
     const [px,py]=toC(players[i].x,players[i].y);
-    if ((cx-px)**2+(cy-py)**2<r*r) return players[i];
+    const r=base*(players[i].size||1)+4;
+    if((cx-px)**2+(cy-py)**2<r*r)return players[i];
   }
   return null;
 }
-function hitEquipment(cx,cy) {
-  const r=Math.max(10,scale*0.9)+4;
-  for (let i=equipment.length-1;i>=0;i--) {
+function hitEquipment(cx,cy){
+  for(let i=equipment.length-1;i>=0;i--){
     const [ex,ey]=toC(equipment[i].x,equipment[i].y);
-    if ((cx-ex)**2+(cy-ey)**2<r*r) return equipment[i];
+    const r=(Math.max(8,scale*.92)*(equipment[i].size||1))+6;
+    if((cx-ex)**2+(cy-ey)**2<r*r)return equipment[i];
   }
   return null;
 }
-function hitBall(cx,cy) {
-  const [bx,by]=toC(ball.x,ball.y);
-  const r=Math.max(7,scale*0.78)+4;
+function hitBall(cx,cy){
+  const [bx,by]=toC(ball.x,ball.y),r=Math.max(7,scale*.82)+5;
   return (cx-bx)**2+(cy-by)**2<r*r;
 }
 
-// ═══════════════════════════════════════════════════════════
-// EVENTI MOUSE
-// ═══════════════════════════════════════════════════════════
-canvas.addEventListener('mousedown', e => {
-  const r=canvas.getBoundingClientRect();
-  const cx=e.clientX-r.left, cy=e.clientY-r.top;
+// ═══════════════════════════════════════════
+// MOUSE / TOUCH
+// ═══════════════════════════════════════════
+canvas.addEventListener('mousedown',e=>{
+  const rc=canvas.getBoundingClientRect();
+  const cx=e.clientX-rc.left, cy=e.clientY-rc.top;
   const [fx,fy]=toF(cx,cy);
-
-  // Modalità piazza oggetto
-  if (placeTool) {
-    placeObject(placeTool, fx, fy);
-    return;
-  }
-
-  if (currentTool==='select') {
-    if (ball.visible && hitBall(cx,cy)) { dragObj={kind:'ball'}; return; }
+  if(placeTool){placeObject(placeTool,fx,fy);return;}
+  if(currentTool==='select'){
+    if(hitBall(cx,cy)){dragObj={kind:'ball'};return;}
     const p=hitPlayer(cx,cy);
-    if (p) {
-      dragObj={kind:'player',ref:p};
-      const [px,py]=toC(p.x,p.y);
-      dragOff={x:cx-px,y:cy-py}; return;
-    }
+    if(p){dragObj={kind:'player',ref:p};const [px,py]=toC(p.x,p.y);dragOff={x:cx-px,y:cy-py};return;}
     const eq=hitEquipment(cx,cy);
-    if (eq) {
-      dragObj={kind:'equipment',ref:eq};
-      const [ex,ey]=toC(eq.x,eq.y);
-      dragOff={x:cx-ex,y:cy-ey}; return;
-    }
-  } else if (currentTool==='erase') {
-    const p=hitPlayer(cx,cy);
-    if (p) { players=players.filter(x=>x!==p); render(); return; }
-    const eq=hitEquipment(cx,cy);
-    if (eq) { equipment=equipment.filter(x=>x!==eq); render(); return; }
+    if(eq){dragObj={kind:'eq',ref:eq};const [ex,ey]=toC(eq.x,eq.y);dragOff={x:cx-ex,y:cy-ey};return;}
+  } else if(currentTool==='erase'){
+    const p=hitPlayer(cx,cy);if(p){players=players.filter(x=>x!==p);render();return;}
+    const eq=hitEquipment(cx,cy);if(eq){equipment=equipment.filter(x=>x!==eq);render();return;}
   } else {
     drawStart={x:fx,y:fy};
     currentDrawing={type:currentTool,color:currentColor,x1:fx,y1:fy,x2:fx,y2:fy,cx:fx,cy:fy,r:0};
   }
 });
 
-canvas.addEventListener('mousemove', e => {
-  const r=canvas.getBoundingClientRect();
-  const cx=e.clientX-r.left, cy=e.clientY-r.top;
+canvas.addEventListener('mousemove',e=>{
+  const rc=canvas.getBoundingClientRect();
+  const cx=e.clientX-rc.left, cy=e.clientY-rc.top;
   const [fx,fy]=toF(cx,cy);
-
-  if (dragObj) {
-    if (dragObj.kind==='ball') {
-      ball.x=clamp(fx,0,FIELD_W); ball.y=clamp(fy,0,FIELD_H);
-    } else if (dragObj.kind==='player') {
-      const [nx,ny]=toF(cx-dragOff.x,cy-dragOff.y);
-      dragObj.ref.x=clamp(nx,0,FIELD_W); dragObj.ref.y=clamp(ny,0,FIELD_H);
-    } else if (dragObj.kind==='equipment') {
-      const [nx,ny]=toF(cx-dragOff.x,cy-dragOff.y);
-      dragObj.ref.x=clamp(nx,0,FIELD_W); dragObj.ref.y=clamp(ny,0,FIELD_H);
-    }
-    render(); return;
+  if(dragObj){
+    if(dragObj.kind==='ball'){ball.x=clamp(fx,0,FW);ball.y=clamp(fy,0,FH);}
+    else if(dragObj.kind==='player'){const [nx,ny]=toF(cx-dragOff.x,cy-dragOff.y);dragObj.ref.x=clamp(nx,0,FW);dragObj.ref.y=clamp(ny,0,FH);}
+    else if(dragObj.kind==='eq'){const [nx,ny]=toF(cx-dragOff.x,cy-dragOff.y);dragObj.ref.x=clamp(nx,0,FW);dragObj.ref.y=clamp(ny,0,FH);}
+    render();return;
   }
-
-  if (currentDrawing && drawStart) {
-    if (currentTool==='arrow'||currentTool==='line') { currentDrawing.x2=fx; currentDrawing.y2=fy; }
-    else if (currentTool==='circle') { const dx=fx-drawStart.x,dy=fy-drawStart.y; currentDrawing.r=Math.sqrt(dx*dx+dy*dy); }
-    else if (currentTool==='zone')   { currentDrawing.x2=fx; currentDrawing.y2=fy; }
+  if(currentDrawing&&drawStart){
+    if(currentTool==='arrow'||currentTool==='line'){currentDrawing.x2=fx;currentDrawing.y2=fy;}
+    else if(currentTool==='circle'){const dx=fx-drawStart.x,dy=fy-drawStart.y;currentDrawing.r=Math.sqrt(dx*dx+dy*dy);}
+    else if(currentTool==='zone'){currentDrawing.x2=fx;currentDrawing.y2=fy;}
     render();
   }
-
-  // Cursore
-  if (placeTool) { canvas.style.cursor='copy'; return; }
-  if (currentTool==='select') {
-    canvas.style.cursor=(hitPlayer(cx,cy)||hitEquipment(cx,cy)||(ball.visible&&hitBall(cx,cy))) ? 'grab' : 'default';
-  } else if (currentTool==='erase') { canvas.style.cursor='not-allowed'; }
-  else { canvas.style.cursor='crosshair'; }
+  if(placeTool)canvas.style.cursor='copy';
+  else if(currentTool==='select')canvas.style.cursor=(hitPlayer(cx,cy)||hitEquipment(cx,cy)||hitBall(cx,cy))?'grab':'default';
+  else if(currentTool==='erase')canvas.style.cursor='not-allowed';
+  else canvas.style.cursor='crosshair';
 });
 
-canvas.addEventListener('mouseup', e => {
-  if (dragObj) { dragObj=null; render(); return; }
-  if (currentDrawing && drawStart) {
-    const r=canvas.getBoundingClientRect();
-    const cx=e.clientX-r.left, cy=e.clientY-r.top;
+canvas.addEventListener('mouseup',e=>{
+  if(dragObj){dragObj=null;render();return;}
+  if(currentDrawing&&drawStart){
+    const rc=canvas.getBoundingClientRect();
+    const cx=e.clientX-rc.left, cy=e.clientY-rc.top;
     const [fx,fy]=toF(cx,cy);
     const dist=Math.sqrt((fx-drawStart.x)**2+(fy-drawStart.y)**2);
-    if (dist>0.5) {
-      if (currentTool==='arrow'||currentTool==='line') drawings.push({...currentDrawing,x2:fx,y2:fy});
-      else if (currentTool==='circle') { const dx=fx-drawStart.x,dy=fy-drawStart.y; drawings.push({...currentDrawing,r:Math.sqrt(dx*dx+dy*dy)}); }
-      else if (currentTool==='zone') drawings.push({...currentDrawing,x2:fx,y2:fy});
+    if(dist>.5){
+      if(currentTool==='arrow'||currentTool==='line')drawings.push({...currentDrawing,x2:fx,y2:fy});
+      else if(currentTool==='circle'){const dx=fx-drawStart.x,dy=fy-drawStart.y;drawings.push({...currentDrawing,r:Math.sqrt(dx*dx+dy*dy)});}
+      else if(currentTool==='zone')drawings.push({...currentDrawing,x2:fx,y2:fy});
     }
-    currentDrawing=null; drawStart=null; render();
+    currentDrawing=null;drawStart=null;render();
   }
 });
 
-canvas.addEventListener('mouseleave', () => {
-  dragObj=null; currentDrawing=null; drawStart=null; render();
-});
+canvas.addEventListener('mouseleave',()=>{dragObj=null;currentDrawing=null;drawStart=null;render();});
 
-// Touch
-canvas.addEventListener('touchstart', e=>{e.preventDefault();simulateMouse(e,'mousedown');},{passive:false});
-canvas.addEventListener('touchmove',  e=>{e.preventDefault();simulateMouse(e,'mousemove');},{passive:false});
-canvas.addEventListener('touchend',   e=>{e.preventDefault();simulateMouse(e,'mouseup');},{passive:false});
-function simulateMouse(e,type) {
-  const t=e.touches[0]||e.changedTouches[0];
-  canvas.dispatchEvent(new MouseEvent(type,{clientX:t.clientX,clientY:t.clientY,bubbles:true}));
+// Scroll wheel → ridimensiona elemento sotto il cursore
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const rc=canvas.getBoundingClientRect();
+  const cx=e.clientX-rc.left, cy=e.clientY-rc.top;
+  const delta=e.deltaY>0?-.1:.1;
+  const p=hitPlayer(cx,cy);
+  if(p){p.size=clamp((p.size||1)+delta,.4,3);showSizeHint(p.size);render();return;}
+  const eq=hitEquipment(cx,cy);
+  if(eq){eq.size=clamp((eq.size||1)+delta,.4,3);showSizeHint(eq.size);render();}
+},{passive:false});
+
+function showSizeHint(sz){
+  const el=document.getElementById('size-hint');
+  el.textContent=`Dimensione: ${Math.round(sz*100)}%`;
+  el.style.opacity='1';
+  clearTimeout(showSizeHint._t);
+  showSizeHint._t=setTimeout(()=>el.style.opacity='0',1200);
 }
 
-// ═══════════════════════════════════════════════════════════
-// TOOLBAR ACTIONS
-// ═══════════════════════════════════════════════════════════
-function setTool(t) {
-  currentTool=t; placeTool=null;
+canvas.addEventListener('touchstart',e=>{e.preventDefault();sim(e,'mousedown');},{passive:false});
+canvas.addEventListener('touchmove', e=>{e.preventDefault();sim(e,'mousemove');},{passive:false});
+canvas.addEventListener('touchend',  e=>{e.preventDefault();sim(e,'mouseup');}, {passive:false});
+function sim(e,type){const t=e.touches[0]||e.changedTouches[0];canvas.dispatchEvent(new MouseEvent(type,{clientX:t.clientX,clientY:t.clientY,bubbles:true}));}
+
+// ═══════════════════════════════════════════
+// TOOLBAR
+// ═══════════════════════════════════════════
+function setTool(t){
+  currentTool=t;placeTool=null;
   document.querySelectorAll('.tb-btn').forEach(b=>b.classList.remove('active'));
-  const btn=document.getElementById('tool-'+t); if(btn) btn.classList.add('active');
+  const el=document.getElementById('tool-'+t);if(el)el.classList.add('active');
   document.querySelectorAll('.tool-item').forEach(b=>b.classList.remove('active'));
 }
-
-function setPlaceTool(t) {
-  placeTool=t; currentTool='select';
+function setPlaceTool(t){
+  placeTool=t;currentTool='select';
   document.querySelectorAll('.tool-item').forEach(b=>b.classList.remove('active'));
-  const el=document.getElementById('ptool-'+t); if(el) el.classList.add('active');
+  const el=document.getElementById('ptool-'+t);if(el)el.classList.add('active');
   document.querySelectorAll('.tb-btn').forEach(b=>b.classList.remove('active'));
   canvas.style.cursor='copy';
 }
-
-function placeObject(type, fx, fy) {
-  const x=clamp(fx,0,FIELD_W), y=clamp(fy,0,FIELD_H);
-  if (type==='player_A') {
-    const num=players.filter(p=>p.team==='A').length+1;
-    players.push({id:'A'+Date.now(),team:'A',num,name:'',x,y});
-  } else if (type==='player_B') {
-    const num=players.filter(p=>p.team==='B').length+1;
-    players.push({id:'B'+Date.now(),team:'B',num,name:'',x,y});
-  } else {
-    equipment.push({id:'eq'+Date.now(),type,x,y});
-  }
+function setColor(el,c){currentColor=c;document.querySelectorAll('.color-dot').forEach(d=>d.classList.remove('active'));el.classList.add('active');}
+function setSize(v,label){
+  currentSize=v;
+  document.querySelectorAll('.size-btn').forEach(b=>b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+function placeObject(type,fx,fy){
+  const x=clamp(fx,0,FW), y=clamp(fy,0,FH);
+  if(type==='player_A'){const num=players.filter(p=>p.team==='A').length+1;players.push({id:'A'+Date.now(),team:'A',num,name:'',x,y,size:currentSize});}
+  else if(type==='player_B'){const num=players.filter(p=>p.team==='B').length+1;players.push({id:'B'+Date.now(),team:'B',num,name:'',x,y,size:currentSize});}
+  else equipment.push({id:'eq'+Date.now(),type,x,y,size:currentSize});
   render();
 }
-
-function setColor(el, c) {
-  currentColor=c;
-  document.querySelectorAll('.color-dot').forEach(d=>d.classList.remove('active'));
-  el.classList.add('active');
+function clearDrawings(){drawings=[];render();}
+function resetAll(){
+  drawings=[];players=[];equipment=[];ball={x:FW/2,y:FH/2};
+  keyframes=[];updateAnimBar();
+  applyFormation('4-4-2','A');applyFormation('4-4-2','B');render();
 }
+function placeBallCenter(){ball={x:FW/2,y:FH/2};render();}
+function exportPNG(){const l=document.createElement('a');l.download='lavagna_tattica.png';l.href=canvas.toDataURL('image/png');l.click();}
 
-function clearDrawings() { drawings=[]; render(); }
+// ═══════════════════════════════════════════
+// ANIMAZIONE FLUIDA
+// ═══════════════════════════════════════════
+const SUB_STEPS=40; // passi di interpolazione tra keyframe
 
-function resetAll() {
-  drawings=[]; players=[]; equipment=[];
-  ball={x:FIELD_W/2,y:FIELD_H/2,visible:true};
-  keyframes=[]; updateAnimBar();
-  applyFormation('4-4-2','A');
-  applyFormation('4-4-2','B');
+function captureState(){
+  return{players:players.map(p=>({...p})),equipment:equipment.map(e=>({...e})),ball:{...ball},drawings:drawings.map(d=>({...d}))};
+}
+function applyState(s){
+  players=s.players.map(p=>({...p}));
+  equipment=s.equipment.map(e=>({...e}));
+  ball={...s.ball};
+  drawings=s.drawings.map(d=>({...d}));
   render();
 }
-
-function placeBallCenter() { ball={x:FIELD_W/2,y:FIELD_H/2,visible:true}; render(); }
-
-function exportPNG() {
-  const link=document.createElement('a');
-  link.download='lavagna_tattica.png';
-  link.href=canvas.toDataURL('image/png');
-  link.click();
-}
-
-// ═══════════════════════════════════════════════════════════
-// ANIMAZIONE
-// ═══════════════════════════════════════════════════════════
-function captureState() {
-  return {
-    players:  players.map(p=>({...p})),
-    equipment:equipment.map(e=>({...e})),
-    ball:     {...ball},
-    drawings: drawings.map(d=>({...d}))
+function interpolateStates(f,t,tv){
+  const et=ease(tv);
+  const lerpObj=(a,b)=>({...a,x:lerp(a.x,b.x,et),y:lerp(a.y,b.y,et)});
+  return{
+    players:f.players.map(fp=>{const tp=t.players.find(p=>p.id===fp.id);return tp?lerpObj(fp,tp):{...fp};}),
+    equipment:f.equipment.map(fe=>{const te=t.equipment.find(e=>e.id===fe.id);return te?lerpObj(fe,te):{...fe};}),
+    ball:{...f.ball,x:lerp(f.ball.x,t.ball.x,et),y:lerp(f.ball.y,t.ball.y,et)},
+    drawings:f.drawings
   };
 }
 
-function applyState(state) {
-  players=state.players.map(p=>({...p}));
-  equipment=state.equipment.map(e=>({...e}));
-  ball={...state.ball};
-  drawings=state.drawings.map(d=>({...d}));
-  render();
-}
-
-function toggleRecord() {
-  if (animPlaying) return;
+function recordFrame(){
+  if(animPlaying)return;
   keyframes.push(captureState());
   updateAnimBar();
-  // Flash feedback
   const btn=document.getElementById('btn-record');
   btn.textContent='✅ Frame '+keyframes.length;
-  setTimeout(()=>{ btn.textContent='⏺ Registra frame'; },800);
+  setTimeout(()=>btn.textContent='⏺ Registra frame',900);
 }
+function clearKeyframes(){if(animPlaying)stopAnim();keyframes=[];updateAnimBar();}
 
-function clearKeyframes() {
-  if (animPlaying) stopAnimation();
-  keyframes=[]; updateAnimBar();
+function togglePlay(){
+  if(animPlaying){stopAnim();}else{startAnim();}
 }
-
-function playAnimation() {
-  if (keyframes.length<2) { alert('Registra almeno 2 frame per l\'animazione.'); return; }
-  if (animPlaying) { stopAnimation(); return; }
-  animPlaying=true; animFrame=0;
+function startAnim(){
+  if(keyframes.length<2){alert('Registra almeno 2 frame.');return;}
+  animPlaying=true;animKeyIdx=0;animT=0;
   document.getElementById('btn-play').textContent='⏹ Stop';
   const speed=parseInt(document.getElementById('anim-speed').value);
-  function step() {
-    if (!animPlaying) return;
-    applyState(keyframes[animFrame]);
+  const msPerStep=speed/SUB_STEPS;
+  let last=null;
+  function step(ts){
+    if(!animPlaying)return;
+    if(last===null){last=ts;}
+    const dt=ts-last; last=ts;
+    animT+=dt/speed;
+    if(animT>=1){animT=0;animKeyIdx=(animKeyIdx+1)%keyframes.length;}
+    const from=keyframes[animKeyIdx];
+    const to=keyframes[(animKeyIdx+1)%keyframes.length];
+    applyState(interpolateStates(from,to,animT));
     updateAnimBar();
-    animFrame=(animFrame+1)%keyframes.length;
-    animTimer=setTimeout(step, speed);
+    animRafId=requestAnimationFrame(step);
   }
-  step();
+  animRafId=requestAnimationFrame(step);
 }
-
-function stopAnimation() {
-  animPlaying=false; clearTimeout(animTimer);
+function stopAnim(){
+  animPlaying=false;cancelAnimationFrame(animRafId);
   document.getElementById('btn-play').textContent='▶ Play';
 }
 
-function updateAnimBar() {
+function updateAnimBar(){
   const n=keyframes.length;
   document.getElementById('anim-frames').textContent=`${n} frame${n!==1?'s':''}`;
   document.getElementById('btn-play').disabled=n<2;
-  const pct=n>1 ? (animFrame/(n-1))*100 : 0;
+  const pct=n>1?(animKeyIdx/(n-1))*100:0;
   document.getElementById('anim-progress').style.width=pct+'%';
 }
+function seekTimeline(e){
+  if(keyframes.length===0||animPlaying)return;
+  const rc=e.currentTarget.getBoundingClientRect();
+  const pct=(e.clientX-rc.left)/rc.width;
+  animKeyIdx=Math.min(keyframes.length-1,Math.floor(pct*keyframes.length));
+  applyState(keyframes[animKeyIdx]);updateAnimBar();
+}
 
-function seekTimeline(e) {
-  if (keyframes.length===0 || animPlaying) return;
-  const r=e.currentTarget.getBoundingClientRect();
-  const pct=(e.clientX-r.left)/r.width;
-  animFrame=Math.min(keyframes.length-1, Math.floor(pct*keyframes.length));
-  applyState(keyframes[animFrame]);
-  updateAnimBar();
+// ═══════════════════════════════════════════
+// PREVIEW PANNELLO SINISTRO
+// ═══════════════════════════════════════════
+function drawPreviews(){
+  // Pedina A
+  (function(){const c=document.getElementById('preview-player_A'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.fillStyle='#3b82f6';x.beginPath();x.arc(20,20,13,0,Math.PI*2);x.fill();
+    x.strokeStyle='#fff';x.lineWidth=2;x.beginPath();x.arc(20,20,13,0,Math.PI*2);x.stroke();
+    x.fillStyle='#fff';x.font='bold 10px Arial';x.textAlign='center';x.textBaseline='middle';x.fillText('1',20,20.5);})();
+  // Pedina B
+  (function(){const c=document.getElementById('preview-player_B'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.fillStyle='#ef4444';x.beginPath();x.arc(20,20,13,0,Math.PI*2);x.fill();
+    x.strokeStyle='#fff';x.lineWidth=2;x.beginPath();x.arc(20,20,13,0,Math.PI*2);x.stroke();
+    x.fillStyle='#fff';x.font='bold 10px Arial';x.textAlign='center';x.textBaseline='middle';x.fillText('1',20,20.5);})();
+  // Pallone
+  (function(){const c=document.getElementById('preview-ball'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    const r=14,cx=20,cy=20;
+    x.fillStyle='#f0f0f0';x.beginPath();x.arc(cx,cy,r,0,Math.PI*2);x.fill();
+    x.save();x.beginPath();x.arc(cx,cy,r,0,Math.PI*2);x.clip();
+    x.fillStyle='#111';
+    function pent(px,py,pr,a0){x.beginPath();for(let i=0;i<5;i++){const a=a0+i*2*Math.PI/5;i?x.lineTo(px+pr*Math.cos(a),py+pr*Math.sin(a)):x.moveTo(px+pr*Math.cos(a),py+pr*Math.sin(a));}x.closePath();x.fill();}
+    pent(cx,cy,r*.30,-Math.PI/2);
+    for(let i=0;i<5;i++){const a=(i*72-90)*Math.PI/180;pent(cx+Math.cos(a)*r*.57,cy+Math.sin(a)*r*.57,r*.22,a+Math.PI+36*Math.PI/180);}
+    x.restore();x.strokeStyle='#333';x.lineWidth=1;x.beginPath();x.arc(cx,cy,r,0,Math.PI*2);x.stroke();})();
+  // Cono
+  (function(){const c=document.getElementById('preview-cone'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.fillStyle='#f97316';x.beginPath();x.moveTo(20,6);x.quadraticCurveTo(33,25,30,34);x.quadraticCurveTo(20,38,10,34);x.quadraticCurveTo(7,25,20,6);x.fill();
+    x.strokeStyle='rgba(255,255,255,.7)';x.lineWidth=1.5;x.beginPath();x.moveTo(13,22);x.lineTo(27,22);x.stroke();x.beginPath();x.moveTo(11,28);x.lineTo(29,28);x.stroke();})();
+  // Cinesino
+  (function(){const c=document.getElementById('preview-cinesino'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.fillStyle='#facc15';x.strokeStyle='#ca8a04';x.lineWidth=1;
+    x.beginPath();x.ellipse(20,23,16,7,0,0,Math.PI*2);x.fill();x.stroke();
+    x.fillStyle='rgba(255,255,255,.35)';x.beginPath();x.ellipse(14,20,6,3,-.3,0,Math.PI*2);x.fill();})();
+  // Porta
+  (function(){const c=document.getElementById('preview-mini_goal'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.strokeStyle='#e5e7eb';x.lineWidth=2.5;x.lineCap='round';
+    x.beginPath();x.moveTo(6,14);x.lineTo(34,14);x.stroke();
+    x.beginPath();x.moveTo(6,14);x.lineTo(6,30);x.stroke();
+    x.beginPath();x.moveTo(34,14);x.lineTo(34,30);x.stroke();
+    x.strokeStyle='rgba(180,180,180,.4)';x.lineWidth=.8;
+    for(let i=0;i<=5;i++){const xi=6+i*(28/5);x.beginPath();x.moveTo(xi,14);x.lineTo(xi,30);x.stroke();}
+    for(let j=0;j<3;j++){const yj=14+j*5.5;x.beginPath();x.moveTo(6,yj);x.lineTo(34,yj);x.stroke();}})();
+  // Ostacolo
+  (function(){const c=document.getElementById('preview-hurdle'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.strokeStyle='#6b7280';x.lineWidth=1.5;x.lineCap='round';
+    x.beginPath();x.moveTo(8,28);x.lineTo(13,18);x.stroke();x.beginPath();x.moveTo(32,28);x.lineTo(27,18);x.stroke();
+    const ns=4;const sw=24/ns;
+    for(let i=0;i<ns;i++){x.fillStyle=i%2===0?'#ef4444':'#fff';x.fillRect(8+i*sw,14,sw,8);}
+    x.strokeStyle='#9ca3af';x.lineWidth=.5;x.strokeRect(8,14,24,8);})();
+  // Manichino
+  (function(){const c=document.getElementById('preview-mannequin'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.fillStyle='#fde047';x.beginPath();x.ellipse(20,26,9,13,0,0,Math.PI*2);x.fill();
+    x.fillStyle='#fef08a';x.beginPath();x.arc(20,10,7,0,Math.PI*2);x.fill();
+    x.fillRect(17,16,6,4);
+    x.strokeStyle='#eab308';x.lineWidth=3;x.lineCap='round';
+    x.beginPath();x.moveTo(11,20);x.lineTo(6,28);x.stroke();x.beginPath();x.moveTo(29,20);x.lineTo(34,28);x.stroke();
+    x.fillStyle='#333';[15,25].forEach(xi=>{x.beginPath();x.arc(xi,9,1.5,0,Math.PI*2);x.fill();});})();
+  // Paletto
+  (function(){const c=document.getElementById('preview-pole'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.fillStyle='#6b7280';x.beginPath();x.ellipse(22,34,8,3,0,0,Math.PI*2);x.fill();
+    const ns=5;const sh=28/ns;
+    for(let i=0;i<ns;i++){x.fillStyle=i%2===0?'#ef4444':'#f1f5f9';x.fillRect(17,6+i*sh,6,sh);}
+    x.strokeStyle='#9ca3af';x.lineWidth=.5;x.strokeRect(17,6,6,28);})();
+  // Extra ball
+  (function(){const c=document.getElementById('preview-extra_ball'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    const r=11,cx=20,cy=20;
+    x.fillStyle='#f0f0f0';x.beginPath();x.arc(cx,cy,r,0,Math.PI*2);x.fill();
+    x.save();x.beginPath();x.arc(cx,cy,r,0,Math.PI*2);x.clip();
+    x.fillStyle='#111';
+    function pent(px,py,pr,a0){x.beginPath();for(let i=0;i<5;i++){const a=a0+i*2*Math.PI/5;i?x.lineTo(px+pr*Math.cos(a),py+pr*Math.sin(a)):x.moveTo(px+pr*Math.cos(a),py+pr*Math.sin(a));}x.closePath();x.fill();}
+    pent(cx,cy,r*.30,-Math.PI/2);
+    for(let i=0;i<5;i++){const a=(i*72-90)*Math.PI/180;pent(cx+Math.cos(a)*r*.57,cy+Math.sin(a)*r*.57,r*.22,a+Math.PI+36*Math.PI/180);}
+    x.restore();x.strokeStyle='#333';x.lineWidth=.8;x.beginPath();x.arc(cx,cy,r,0,Math.PI*2);x.stroke();})();
+  // Cancella
+  (function(){const c=document.getElementById('preview-erase'),x=c.getContext('2d');x.clearRect(0,0,40,40);
+    x.strokeStyle='#ef4444';x.lineWidth=3;x.lineCap='round';
+    x.beginPath();x.moveTo(10,10);x.lineTo(30,30);x.stroke();x.beginPath();x.moveTo(30,10);x.lineTo(10,30);x.stroke();})();
 }
 </script>
 </body>
