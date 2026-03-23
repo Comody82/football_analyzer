@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0B1220; overflow: hidden; width: 100vw; height: 100vh; }
+    #tactical-canvas { display: block; width: 100%; height: 100%; }
+    #no-data-msg {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: rgba(255,255,255,0.4); font-family: Arial, sans-serif;
+      font-size: 13px; text-align: center; pointer-events: none;
+    }
+    #legend {
+      position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 14px; align-items: center;
+      font-family: Arial, sans-serif; font-size: 11px; color: rgba(255,255,255,0.6);
+      pointer-events: none;
+    }
+    .leg-item { display: flex; align-items: center; gap: 5px; }
+    .leg-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid white; }
+  </style>
+</head>
+<body>
+  <canvas id="tactical-canvas"></canvas>
+  <div id="no-data-msg">Esegui prima l'analisi automatica per vedere la lavagna tattica.</div>
+  <div id="legend" style="display:none">
+    <div class="leg-item"><div class="leg-dot" style="background:#3b82f6"></div> Team A</div>
+    <div class="leg-item"><div class="leg-dot" style="background:#ef4444"></div> Team B</div>
+    <div class="leg-item"><div class="leg-dot" style="background:#f59e0b"></div> Portiere/Arbitro</div>
+    <div class="leg-item"><div class="leg-dot" style="background:white"></div> Palla</div>
+  </div>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    let backend = null;
+    let playerTracks = null;
+    let ballTracks = null;
+    const TRAIL_FRAMES = 8;   // quanti frame di scia mostrare
+    const TEAM_COLORS = { 0: '#3b82f6', 1: '#ef4444', 2: '#f59e0b' };
+
+    new QWebChannel(qt.webChannelTransport, function(channel) {
+      backend = channel.objects.backend;
+      let loaded = 0;
+      function onBothLoaded() {
+        if (++loaded < 2) return;
+        const hasData = playerTracks && playerTracks.frames && playerTracks.frames.length > 0;
+        if (hasData) {
+          document.getElementById('no-data-msg').style.display = 'none';
+          document.getElementById('legend').style.display = 'flex';
+          startLoop();
+        }
+      }
+      backend.getPlayerTracksJson(function(json) {
+        try { playerTracks = JSON.parse(json); } catch(e) {}
+        onBothLoaded();
+      });
+      backend.getBallTracksJson(function(json) {
+        try { ballTracks = JSON.parse(json); } catch(e) {}
+        onBothLoaded();
+      });
+    });
+
+    function startLoop() {
+      function update() {
+        backend.getCurrentPositionMs(function(posMs) {
+          drawBoard(posMs);
+          setTimeout(() => requestAnimationFrame(update), 80);
+        });
+      }
+      requestAnimationFrame(update);
+    }
+
+    // ── Ricerca frame per posizione temporale ────────────────────────────
+    function getFrameIdx(tracks, posMs) {
+      if (!tracks || !tracks.frames) return -1;
+      const fps = tracks.fps || 3.0;
+      const idx = Math.round(posMs / 1000.0 * fps);
+      return Math.min(Math.max(0, idx), tracks.frames.length - 1);
+    }
+
+    function getDetections(tracks, idx) {
+      if (idx < 0 || !tracks || !tracks.frames) return [];
+      const f = tracks.frames[idx];
+      return (f && f.detections) || [];
+    }
+
+    function getBallDetection(idx) {
+      if (!ballTracks || !ballTracks.frames || idx < 0) return null;
+      const f = ballTracks.frames[idx];
+      if (!f) return null;
+      // ball_tracks ha struttura: { detection: {x,y,w,h} } oppure { detections: [...] }
+      return f.detection || (f.detections && f.detections[0]) || null;
+    }
+
+    // ── Coordinate: pixel → metri usando x_m/y_m se calibrati ───────────
+    function detToMeters(det, videoW, videoH) {
+      if (det.x_m !== undefined && det.y_m !== undefined) {
+        return { xm: det.x_m, ym: det.y_m };
+      }
+      const cx = (det.x || 0) + (det.w || 0) / 2;
+      const cy = (det.y || 0) + (det.h || 0);
+      return { xm: (cx / videoW) * 105, ym: (cy / videoH) * 68 };
+    }
+
+    function ballToMeters(det, videoW, videoH) {
+      if (!det) return null;
+      if (det.x_m !== undefined && det.y_m !== undefined) {
+        return { xm: det.x_m, ym: det.y_m };
+      }
+      const cx = (det.x || 0) + (det.w || 0) / 2;
+      const cy = (det.y || 0) + (det.h || 0) / 2;
+      return { xm: (cx / videoW) * 105, ym: (cy / videoH) * 68 };
+    }
+
+    // ── Disegno campo ────────────────────────────────────────────────────
+    function drawField(ctx, canvas) {
+      const PAD = 12;
+      const RATIO = 105 / 68;
+      let fW = canvas.width - PAD * 2;
+      let fH = fW / RATIO;
+      if (fH > canvas.height - PAD * 2) { fH = canvas.height - PAD * 2; fW = fH * RATIO; }
+      const ox = (canvas.width - fW) / 2;
+      const oy = (canvas.height - fH) / 2;
+
+      // erba a righe alternate
+      ctx.fillStyle = '#166534';
+      ctx.fillRect(ox, oy, fW, fH);
+      const stripes = 10;
+      for (let i = 0; i < stripes; i++) {
+        if (i % 2 === 0) {
+          ctx.fillStyle = 'rgba(0,0,0,0.06)';
+          ctx.fillRect(ox + i * fW / stripes, oy, fW / stripes, fH);
+        }
+      }
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 1.5;
+
+      // bordo
+      ctx.strokeRect(ox, oy, fW, fH);
+      // centrocampo
+      ctx.beginPath(); ctx.moveTo(ox + fW/2, oy); ctx.lineTo(ox + fW/2, oy + fH); ctx.stroke();
+      // cerchio
+      const rc = (9.15/105)*fW;
+      ctx.beginPath(); ctx.arc(ox + fW/2, oy + fH/2, rc, 0, Math.PI*2); ctx.stroke();
+      // punto centrocampo
+      ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(ox + fW/2, oy + fH/2, 2, 0, Math.PI*2); ctx.fill();
+
+      // aree grandi
+      const gaD = (16.5/105)*fW, gaH = (40.32/68)*fH, gaY = oy + (fH-gaH)/2;
+      ctx.strokeRect(ox, gaY, gaD, gaH);
+      ctx.strokeRect(ox + fW - gaD, gaY, gaD, gaH);
+      // aree piccole
+      const paD = (5.5/105)*fW, paH = (18.32/68)*fH, paY = oy + (fH-paH)/2;
+      ctx.strokeRect(ox, paY, paD, paH);
+      ctx.strokeRect(ox + fW - paD, paY, paD, paH);
+      // dischetti rigore
+      const penR = 2;
+      ctx.fillStyle = 'white';
+      ctx.beginPath(); ctx.arc(ox + (11/105)*fW, oy + fH/2, penR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ox + (94/105)*fW, oy + fH/2, penR, 0, Math.PI*2); ctx.fill();
+
+      return { ox, oy, fW, fH };
+    }
+
+    function metersToCanvas(xm, ym, ox, oy, fW, fH) {
+      return {
+        px: ox + Math.max(0, Math.min(105, xm)) / 105 * fW,
+        py: oy + Math.max(0, Math.min(68, ym)) / 68 * fH
+      };
+    }
+
+    // ── Disegno principale ───────────────────────────────────────────────
+    function drawBoard(posMs) {
+      const canvas = document.getElementById('tactical-canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      if (canvas.width <= 0 || canvas.height <= 0) return;
+
+      ctx.fillStyle = '#0B1220';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const field = drawField(ctx, canvas);
+      const { ox, oy, fW, fH } = field;
+
+      const videoW = playerTracks.width || 1280;
+      const videoH = playerTracks.height || 720;
+      const fps = playerTracks.fps || 3.0;
+      const currIdx = getFrameIdx(playerTracks, posMs);
+
+      // ── Scie giocatori (trail) ──────────────────────────────────────
+      const teamTrails = {};   // track_id → [{xm, ym, alpha}]
+      for (let ti = Math.max(0, currIdx - TRAIL_FRAMES); ti < currIdx; ti++) {
+        const age = currIdx - ti;                          // 1=più recente
+        const alpha = 0.08 + 0.08 * (TRAIL_FRAMES - age); // sfuma verso il passato
+        const dets = getDetections(playerTracks, ti);
+        for (const det of dets) {
+          const { xm, ym } = detToMeters(det, videoW, videoH);
+          const id = det.track_id;
+          if (!teamTrails[id]) teamTrails[id] = { color: TEAM_COLORS[det.team] || '#6b7280', pts: [] };
+          teamTrails[id].pts.push({ xm, ym, alpha });
+        }
+      }
+      for (const [id, trail] of Object.entries(teamTrails)) {
+        for (const pt of trail.pts) {
+          const { px, py } = metersToCanvas(pt.xm, pt.ym, ox, oy, fW, fH);
+          ctx.globalAlpha = pt.alpha;
+          ctx.fillStyle = trail.color;
+          ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+
+      // ── Baricentro per squadra (linea tratteggiata orizzontale) ─────
+      const dets = getDetections(playerTracks, currIdx);
+      const teams = { 0: [], 1: [] };
+      for (const det of dets) {
+        const { xm, ym } = detToMeters(det, videoW, videoH);
+        if (det.team === 0 || det.team === 1) teams[det.team].push({ xm, ym });
+      }
+      for (const [team, pts] of Object.entries(teams)) {
+        if (pts.length < 2) continue;
+        const avgX = pts.reduce((s, p) => s + p.xm, 0) / pts.length;
+        const { px } = metersToCanvas(avgX, 0, ox, oy, fW, fH);
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = team === '0' ? 'rgba(59,130,246,0.5)' : 'rgba(239,68,68,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(px, oy); ctx.lineTo(px, oy + fH); ctx.stroke();
+        ctx.restore();
+      }
+
+      // ── Giocatori frame corrente ─────────────────────────────────────
+      for (const det of dets) {
+        const { xm, ym } = detToMeters(det, videoW, videoH);
+        const { px, py } = metersToCanvas(xm, ym, ox, oy, fW, fH);
+        const color = TEAM_COLORS[det.team] !== undefined ? TEAM_COLORS[det.team] : '#6b7280';
+        const r = 8;
+
+        // ombra
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 4;
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.stroke();
+
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 7px Arial';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(det.track_id || ''), px, py);
+      }
+
+      // ── Palla ────────────────────────────────────────────────────────
+      const ballIdx = getFrameIdx(ballTracks, posMs);
+      const ballDet = getBallDetection(ballIdx);
+      if (ballDet) {
+        const ballVideoW = (ballTracks && ballTracks.width) || videoW;
+        const ballVideoH = (ballTracks && ballTracks.height) || videoH;
+        const bm = ballToMeters(ballDet, ballVideoW, ballVideoH);
+        if (bm) {
+          const { px, py } = metersToCanvas(bm.xm, bm.ym, ox, oy, fW, fH);
+          // alone giallo
+          ctx.shadowColor = 'rgba(250,204,21,0.8)';
+          ctx.shadowBlur = 8;
+          ctx.fillStyle = 'white';
+          ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2); ctx.fill();
+          ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2); ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+      }
+    }
+  </script>
+</body>
+</html>
