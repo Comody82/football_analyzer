@@ -402,6 +402,18 @@ Frame 4K raw (3840×2160) — per tutta la partita
 
 **Scenario d'uso principale**: fine primo tempo → allenatore apre tablet/laptop → vede chi sta rendendo di meno, chi ha corso di più, chi ha perso più palle → cambia tattica o sostituisce giocatore con dati alla mano.
 
+**Architettura Live** (sfida principale: latenza vs qualità):
+```
+Camera 4K → streaming RTSP/locale
+    ↓ chunking (ogni 30 secondi)
+    ↓ upload chunk su RunPod
+    ↓ Triple-Stream processing sul chunk
+    ↓ risultati parziali → merge con chunks precedenti
+    ↓ dashboard aggiornata ogni ~60 secondi
+```
+
+> **Nota architetturale**: questa feature richiede il Triple-Stream già sviluppato + connessione internet stabile dal campo. Per campi senza connessione → modalità "delayed live" con sync al rientro negli spogliatoi.
+
 - [ ] **Modalità Live**: toggle all'avvio → attiva processing in streaming invece che post-match
 - [ ] **Chunking video**: divide il flusso in segmenti da 30-60 secondi → processa e accumula risultati
 - [ ] **Statistiche cumulative real-time**: distanza, tocchi, passaggi aggiornati ogni minuto
@@ -409,6 +421,7 @@ Frame 4K raw (3840×2160) — per tutta la partita
 - [ ] **Alert automatici**: notifica se giocatore X cala drasticamente → possibile infortunio o stanchezza
 - [ ] **Snapshot intervallo**: al 45° genera automaticamente report PDF con statistiche primo tempo
 - [ ] **Latenza target**: < 90 secondi dal campo al dato visibile sul tablet dell'allenatore
+- [ ] **Modalità "Delayed Live"**: campi senza connessione → processing locale in background → sync automatica al rientro negli spogliatoi
 
 ---
 
