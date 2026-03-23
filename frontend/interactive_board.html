@@ -5,21 +5,19 @@
 <title>Lavagna Tattica Interattiva</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#0B1220; font-family: Arial, sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; user-select:none; }
+body { background:#0B1220; font-family: Arial, sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; user-select:none; color:#e9f1ff; }
 
 /* ── TOOLBAR ── */
 #toolbar {
-  display:flex; align-items:center; gap:6px; padding:6px 10px;
+  display:flex; align-items:center; gap:5px; padding:5px 8px;
   background:#111827; border-bottom:1px solid #1e2d45; flex-shrink:0; flex-wrap:wrap;
 }
-.tb-group { display:flex; gap:4px; align-items:center; }
-.tb-sep { width:1px; height:22px; background:#1e2d45; margin:0 4px; }
-.tb-label { font-size:10px; color:#4a6080; margin-right:2px; }
-
+.tb-sep { width:1px; height:20px; background:#1e2d45; margin:0 3px; flex-shrink:0; }
+.tb-label { font-size:10px; color:#4a6080; white-space:nowrap; }
 button.tb-btn {
   background:#1a2640; border:1px solid #2a3f5f; color:#9eb0c8;
-  border-radius:5px; padding:3px 8px; font-size:11px; cursor:pointer;
-  white-space:nowrap; transition: background 0.15s, color 0.15s;
+  border-radius:5px; padding:3px 7px; font-size:11px; cursor:pointer; white-space:nowrap;
+  transition: background 0.15s, color 0.15s;
 }
 button.tb-btn:hover { background:#243350; color:#e9f1ff; }
 button.tb-btn.active { background:#1d4ed8; border-color:#3b82f6; color:#fff; }
@@ -27,203 +25,323 @@ button.tb-btn.danger { border-color:#ef444460; color:#ef4444; }
 button.tb-btn.danger:hover { background:#3f1111; }
 button.tb-btn.success { border-color:#22c55e60; color:#22c55e; }
 button.tb-btn.success:hover { background:#112811; }
+button.tb-btn.warning { border-color:#f59e0b60; color:#f59e0b; }
+button.tb-btn.warning:hover { background:#311e00; }
+.color-dot { width:18px; height:18px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:border 0.1s; }
+.color-dot:hover, .color-dot.active { border-color:#fff; }
 
-/* ── MAIN AREA ── */
+/* ── MAIN ── */
 #main { display:flex; flex:1; overflow:hidden; }
 
-/* ── FIELD WRAPPER ── */
-#field-wrap {
-  flex:1; display:flex; align-items:center; justify-content:center;
-  padding:8px; position:relative;
+/* ── LEFT PANEL (strumenti) ── */
+#tools-panel {
+  width:72px; background:#0d1a2e; border-right:1px solid #1e2d45;
+  display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0;
+  padding:6px 4px; gap:4px;
 }
-#field-canvas { cursor:crosshair; display:block; }
+.tp-label { font-size:9px; color:#4a6080; text-align:center; margin:4px 0 2px; text-transform:uppercase; letter-spacing:0.4px; }
+.tool-item {
+  display:flex; flex-direction:column; align-items:center; gap:2px;
+  padding:5px 3px; border-radius:6px; cursor:pointer; border:1px solid transparent;
+  transition:background 0.12s, border 0.12s;
+}
+.tool-item:hover { background:#1a2640; border-color:#2a3f5f; }
+.tool-item.active { background:#1d3a6e; border-color:#3b82f6; }
+.tool-item span.icon { font-size:20px; line-height:1; }
+.tool-item span.lbl { font-size:9px; color:#6a8aaa; text-align:center; line-height:1.2; }
 
-/* ── SIDE PANEL ── */
-#side-panel {
-  width:140px; background:#111827; border-left:1px solid #1e2d45;
-  display:flex; flex-direction:column; gap:0; overflow-y:auto; flex-shrink:0;
-}
-.side-section { padding:8px; border-bottom:1px solid #1a2640; }
-.side-title { font-size:10px; color:#4a6080; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; }
+/* ── FIELD ── */
+#field-wrap { flex:1; display:flex; align-items:center; justify-content:center; padding:6px; position:relative; }
+#field-canvas { display:block; }
 
-.player-slot {
-  display:flex; align-items:center; gap:6px; padding:3px 4px;
-  border-radius:4px; cursor:grab; transition:background 0.1s;
-  font-size:11px; color:#9eb0c8;
+/* ── RIGHT PANEL (squadre) ── */
+#teams-panel {
+  width:150px; background:#0d1a2e; border-left:1px solid #1e2d45;
+  display:flex; flex-direction:column; overflow:hidden; flex-shrink:0;
 }
-.player-slot:hover { background:#1a2640; }
-.player-dot {
-  width:20px; height:20px; border-radius:50%; border:2px solid white;
+.team-section { flex:1; overflow-y:auto; border-bottom:1px solid #1e2d45; padding:6px; }
+.team-title {
+  font-size:10px; font-weight:700; margin-bottom:6px; padding:3px 6px;
+  border-radius:4px; text-align:center;
+}
+.player-row {
+  display:flex; align-items:center; gap:5px; padding:3px 4px;
+  border-radius:4px; cursor:pointer; font-size:11px; color:#9eb0c8;
+  transition:background 0.1s;
+}
+.player-row:hover { background:#1a2640; }
+.player-row.on-field { color:#e9f1ff; }
+.p-dot {
+  width:18px; height:18px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.6);
   display:flex; align-items:center; justify-content:center;
-  font-size:9px; font-weight:700; color:#fff; flex-shrink:0;
+  font-size:8px; font-weight:700; flex-shrink:0;
 }
+.p-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.p-num { font-size:9px; color:#4a6080; }
+
+/* ── ANIMATION BAR ── */
+#anim-bar {
+  display:flex; align-items:center; gap:6px; padding:5px 10px;
+  background:#111827; border-top:1px solid #1e2d45; flex-shrink:0;
+}
+#anim-timeline {
+  flex:1; height:6px; background:#1e2d45; border-radius:3px; cursor:pointer; position:relative;
+}
+#anim-progress { height:100%; background:#3b82f6; border-radius:3px; width:0%; transition:width 0.1s; }
+#anim-frames { font-size:10px; color:#4a6080; white-space:nowrap; min-width:60px; }
 </style>
 </head>
 <body>
 
 <!-- TOOLBAR -->
 <div id="toolbar">
-  <!-- Moduli -->
-  <span class="tb-label">Modulo:</span>
-  <div class="tb-group">
-    <button class="tb-btn" onclick="applyFormation('4-4-2','A')">4-4-2 A</button>
-    <button class="tb-btn" onclick="applyFormation('4-3-3','A')">4-3-3 A</button>
-    <button class="tb-btn" onclick="applyFormation('3-5-2','A')">3-5-2 A</button>
-    <button class="tb-btn" onclick="applyFormation('4-2-3-1','A')">4-2-3-1 A</button>
-  </div>
+  <!-- Moduli A -->
+  <span class="tb-label">A:</span>
+  <button class="tb-btn" onclick="applyFormation('4-4-2','A')">4-4-2</button>
+  <button class="tb-btn" onclick="applyFormation('4-3-3','A')">4-3-3</button>
+  <button class="tb-btn" onclick="applyFormation('3-5-2','A')">3-5-2</button>
+  <button class="tb-btn" onclick="applyFormation('4-2-3-1','A')">4-2-3-1</button>
+  <button class="tb-btn" onclick="applyFormation('5-3-2','A')">5-3-2</button>
   <div class="tb-sep"></div>
-  <div class="tb-group">
-    <button class="tb-btn" onclick="applyFormation('4-4-2','B')">4-4-2 B</button>
-    <button class="tb-btn" onclick="applyFormation('4-3-3','B')">4-3-3 B</button>
-    <button class="tb-btn" onclick="applyFormation('3-5-2','B')">3-5-2 B</button>
-    <button class="tb-btn" onclick="applyFormation('4-2-3-1','B')">4-2-3-1 B</button>
-  </div>
+  <!-- Moduli B -->
+  <span class="tb-label">B:</span>
+  <button class="tb-btn" onclick="applyFormation('4-4-2','B')">4-4-2</button>
+  <button class="tb-btn" onclick="applyFormation('4-3-3','B')">4-3-3</button>
+  <button class="tb-btn" onclick="applyFormation('3-5-2','B')">3-5-2</button>
+  <button class="tb-btn" onclick="applyFormation('4-2-3-1','B')">4-2-3-1</button>
+  <button class="tb-btn" onclick="applyFormation('5-3-2','B')">5-3-2</button>
   <div class="tb-sep"></div>
   <!-- Strumenti disegno -->
-  <span class="tb-label">Disegno:</span>
-  <div class="tb-group">
-    <button class="tb-btn" id="tool-select" onclick="setTool('select')" title="Seleziona/Muovi pedine">↖ Muovi</button>
-    <button class="tb-btn" id="tool-arrow" onclick="setTool('arrow')" title="Disegna freccia">➜ Freccia</button>
-    <button class="tb-btn" id="tool-line" onclick="setTool('line')" title="Disegna linea">— Linea</button>
-    <button class="tb-btn" id="tool-circle" onclick="setTool('circle')" title="Disegna cerchio">◯ Cerchio</button>
-    <button class="tb-btn" id="tool-zone" onclick="setTool('zone')" title="Zona colorata">▭ Zona</button>
-  </div>
+  <button class="tb-btn" id="tool-select"  onclick="setTool('select')">↖ Muovi</button>
+  <button class="tb-btn" id="tool-arrow"   onclick="setTool('arrow')">➜ Freccia</button>
+  <button class="tb-btn" id="tool-line"    onclick="setTool('line')">— Linea</button>
+  <button class="tb-btn" id="tool-circle"  onclick="setTool('circle')">◯ Cerchio</button>
+  <button class="tb-btn" id="tool-zone"    onclick="setTool('zone')">▭ Zona</button>
   <div class="tb-sep"></div>
-  <!-- Colore -->
-  <span class="tb-label">Colore:</span>
-  <div class="tb-group">
-    <button class="tb-btn" onclick="setColor('#facc15')" style="background:#facc15;color:#000;border-color:#facc15" title="Giallo">●</button>
-    <button class="tb-btn" onclick="setColor('#f87171')" style="background:#f87171;color:#fff;border-color:#f87171" title="Rosso">●</button>
-    <button class="tb-btn" onclick="setColor('#60a5fa')" style="background:#60a5fa;color:#fff;border-color:#60a5fa" title="Blu">●</button>
-    <button class="tb-btn" onclick="setColor('#4ade80')" style="background:#4ade80;color:#000;border-color:#4ade80" title="Verde">●</button>
-    <button class="tb-btn" onclick="setColor('#ffffff')" style="background:#fff;color:#000;border-color:#fff" title="Bianco">●</button>
-  </div>
+  <!-- Colori -->
+  <div class="color-dot active" style="background:#facc15" onclick="setColor(this,'#facc15')" title="Giallo"></div>
+  <div class="color-dot" style="background:#f87171" onclick="setColor(this,'#f87171')" title="Rosso"></div>
+  <div class="color-dot" style="background:#60a5fa" onclick="setColor(this,'#60a5fa')" title="Blu"></div>
+  <div class="color-dot" style="background:#4ade80" onclick="setColor(this,'#4ade80')" title="Verde"></div>
+  <div class="color-dot" style="background:#ffffff" onclick="setColor(this,'#ffffff')" title="Bianco"></div>
   <div class="tb-sep"></div>
   <!-- Azioni -->
-  <div class="tb-group">
-    <button class="tb-btn danger" onclick="clearDrawings()">🗑 Cancella disegni</button>
-    <button class="tb-btn danger" onclick="resetAll()">↺ Reset tutto</button>
-    <button class="tb-btn success" onclick="exportPNG()">💾 Esporta PNG</button>
-  </div>
-  <!-- Palla -->
-  <div class="tb-sep"></div>
-  <div class="tb-group">
-    <button class="tb-btn" onclick="placeBall()" title="Posiziona palla al centro">⚽ Palla</button>
-  </div>
+  <button class="tb-btn danger"  onclick="clearDrawings()">🗑 Disegni</button>
+  <button class="tb-btn danger"  onclick="resetAll()">↺ Reset</button>
+  <button class="tb-btn success" onclick="exportPNG()">💾 PNG</button>
 </div>
 
 <!-- MAIN -->
 <div id="main">
+
+  <!-- LEFT: strumenti allenamento -->
+  <div id="tools-panel">
+    <div class="tp-label">Pedine</div>
+    <div class="tool-item" onclick="setPlaceTool('player_A')" id="ptool-player_A" title="Pedina Team A">
+      <span class="icon">🔵</span><span class="lbl">Team A</span>
+    </div>
+    <div class="tool-item" onclick="setPlaceTool('player_B')" id="ptool-player_B" title="Pedina Team B">
+      <span class="icon">🔴</span><span class="lbl">Team B</span>
+    </div>
+    <div class="tool-item" onclick="placeBallCenter()" title="Posiziona palla al centro">
+      <span class="icon">⚽</span><span class="lbl">Palla</span>
+    </div>
+    <div class="tp-label">Campo</div>
+    <div class="tool-item" onclick="setPlaceTool('cone')" id="ptool-cone" title="Birillo/Cono">
+      <span class="icon">🔶</span><span class="lbl">Birillo</span>
+    </div>
+    <div class="tool-item" onclick="setPlaceTool('cinesino')" id="ptool-cinesino" title="Cinesino">
+      <span class="icon">🟡</span><span class="lbl">Cinesino</span>
+    </div>
+    <div class="tool-item" onclick="setPlaceTool('mini_goal')" id="ptool-mini_goal" title="Porta piccola">
+      <span class="icon">🥅</span><span class="lbl">Porta</span>
+    </div>
+    <div class="tool-item" onclick="setPlaceTool('hurdle')" id="ptool-hurdle" title="Ostacolo/Hurdle">
+      <span class="icon">🟧</span><span class="lbl">Ostacolo</span>
+    </div>
+    <div class="tool-item" onclick="setPlaceTool('mannequin')" id="ptool-mannequin" title="Manichino">
+      <span class="icon">🧍</span><span class="lbl">Manichino</span>
+    </div>
+    <div class="tool-item" onclick="setPlaceTool('pole')" id="ptool-pole" title="Paletto">
+      <span class="icon">🔴</span><span class="lbl">Paletto</span>
+    </div>
+    <div class="tool-item" onclick="setPlaceTool('extra_ball')" id="ptool-extra_ball" title="Pallone extra">
+      <span class="icon">⚪</span><span class="lbl">Pallone</span>
+    </div>
+    <div class="tp-label">Cancella</div>
+    <div class="tool-item" onclick="setTool('erase')" id="ptool-erase" title="Cancella elemento">
+      <span class="icon">🗑️</span><span class="lbl">Elimina</span>
+    </div>
+  </div>
+
+  <!-- CENTER: campo -->
   <div id="field-wrap">
     <canvas id="field-canvas"></canvas>
   </div>
+
+  <!-- RIGHT: squadre/giocatori -->
+  <div id="teams-panel">
+    <div class="team-section" id="team-a-section">
+      <div class="team-title" id="team-a-title" style="background:rgba(59,130,246,0.2);color:#60a5fa">Team A</div>
+      <div id="team-a-players"></div>
+    </div>
+    <div class="team-section" id="team-b-section">
+      <div class="team-title" id="team-b-title" style="background:rgba(239,68,68,0.2);color:#f87171">Team B</div>
+      <div id="team-b-players"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ANIMATION BAR -->
+<div id="anim-bar">
+  <button class="tb-btn warning" id="btn-record" onclick="toggleRecord()">⏺ Registra frame</button>
+  <button class="tb-btn" id="btn-play" onclick="playAnimation()" disabled>▶ Play</button>
+  <button class="tb-btn" onclick="clearKeyframes()">✕ Svuota</button>
+  <div id="anim-timeline" onclick="seekTimeline(event)">
+    <div id="anim-progress"></div>
+  </div>
+  <span id="anim-frames">0 frame</span>
+  <span class="tb-label" style="margin-left:4px">Velocità:</span>
+  <select id="anim-speed" style="background:#1a2640;color:#9eb0c8;border:1px solid #2a3f5f;border-radius:4px;padding:2px 4px;font-size:11px;cursor:pointer">
+    <option value="800">Lenta</option>
+    <option value="500" selected>Media</option>
+    <option value="250">Veloce</option>
+  </select>
 </div>
 
 <script>
 // ═══════════════════════════════════════════════════════════
-// STATO GLOBALE
+// COSTANTI CAMPO
 // ═══════════════════════════════════════════════════════════
-const FIELD_W = 105, FIELD_H = 68; // metri reali
+const FIELD_W = 105, FIELD_H = 68;
 
-const TEAMS = {
+const TEAMS_CFG = {
   A: { color:'#3b82f6', label:'Team A' },
   B: { color:'#ef4444', label:'Team B' }
 };
 
-// Pedine: { id, team, num, x, y }  (x,y in metri campo)
-let players = [];
-let ball = { x: FIELD_W/2, y: FIELD_H/2, visible: true };
-
-// Disegni: { type, color, ...coords }
-let drawings = [];
+// ═══════════════════════════════════════════════════════════
+// STATO
+// ═══════════════════════════════════════════════════════════
+let players     = [];  // { id, team, num, name, x, y }
+let equipment   = [];  // { id, type, x, y, angle:0 }
+let ball        = { x: FIELD_W/2, y: FIELD_H/2, visible:true };
+let drawings    = [];  // { type, color, ... }
 let currentDrawing = null;
 
-// Strumento attivo
-let currentTool = 'select';
+let currentTool  = 'select';
+let placeTool    = null;   // tool da piazzare (es. 'cone')
 let currentColor = '#facc15';
 
-// Drag stato
-let dragPlayer = null;
-let dragOffX = 0, dragOffY = 0;
-let dragBall = false;
-let drawStart = null;
+// drag
+let dragObj    = null;   // { kind:'player'|'equipment'|'ball', ref }
+let dragOff    = {x:0, y:0};
+let drawStart  = null;
 
-// Canvas
+// animazione
+let keyframes      = [];
+let isRecording    = false;
+let animPlaying    = false;
+let animTimer      = null;
+let animFrame      = 0;
+
+// dati squadre (iniettati da Python)
+let teamsData = { A: null, B: null };
+
 const canvas = document.getElementById('field-canvas');
-const ctx = canvas.getContext('2d');
-let scale = 1, offX = 0, offY = 0; // px per metro + offset campo
+const ctx    = canvas.getContext('2d');
+let scale    = 1;
 
 // ═══════════════════════════════════════════════════════════
-// FORMAZIONI  (coordinate in metri, squadra A attacca →, B attacca ←)
+// FORMAZIONI
 // ═══════════════════════════════════════════════════════════
 const FORMATIONS = {
-  '4-4-2': [
-    // portiere, 4 difensori, 4 centrocampisti, 2 attaccanti
-    [5, 34],
-    [12,15],[12,28],[12,42],[12,55],
-    [35,12],[35,26],[35,42],[35,56],
-    [68,26],[68,42]
-  ],
-  '4-3-3': [
-    [5, 34],
-    [12,15],[12,28],[12,42],[12,55],
-    [38,20],[38,34],[38,50],
-    [72,14],[72,34],[72,54]
-  ],
-  '3-5-2': [
-    [5, 34],
-    [15,20],[15,34],[15,50],
-    [35,10],[35,23],[35,34],[35,46],[35,60],
-    [65,26],[65,42]
-  ],
-  '4-2-3-1': [
-    [5, 34],
-    [12,15],[12,28],[12,42],[12,55],
-    [30,26],[30,42],
-    [52,14],[52,34],[52,54],
-    [72,34]
-  ]
+  '4-4-2':   [[5,34],[12,15],[12,28],[12,42],[12,55],[35,12],[35,26],[35,42],[35,56],[68,26],[68,42]],
+  '4-3-3':   [[5,34],[12,15],[12,28],[12,42],[12,55],[38,20],[38,34],[38,50],[72,14],[72,34],[72,54]],
+  '3-5-2':   [[5,34],[15,20],[15,34],[15,50],[35,10],[35,23],[35,34],[35,46],[35,60],[65,26],[65,42]],
+  '4-2-3-1': [[5,34],[12,15],[12,28],[12,42],[12,55],[30,26],[30,42],[52,14],[52,34],[52,54],[72,34]],
+  '5-3-2':   [[5,34],[12,10],[12,22],[12,34],[12,46],[12,58],[38,20],[38,34],[38,50],[65,26],[65,42]]
 };
 
 function mirrorFormation(coords) {
-  // Specchia per squadra B (attacca da destra verso sinistra)
-  return coords.map(([x,y]) => [FIELD_W - x, FIELD_H - y]);
+  return coords.map(([x,y]) => [FIELD_W-x, FIELD_H-y]);
 }
 
 function applyFormation(name, team) {
-  const coords = FORMATIONS[name];
-  if (!coords) return;
-  const base = team === 'A' ? coords : mirrorFormation(coords);
-  // Rimuovi pedine esistenti di questo team
+  const coords = FORMATIONS[name]; if (!coords) return;
+  const base   = team === 'A' ? coords : mirrorFormation(coords);
   players = players.filter(p => p.team !== team);
+  const td = teamsData[team];
   base.forEach(([x,y], i) => {
-    players.push({ id: `${team}${i+1}`, team, num: i+1, x, y });
+    let name='', num=i+1;
+    if (td && td.players && td.players[i]) {
+      const p = td.players[i];
+      name = p.name || '';
+      num  = p.jersey_number != null ? p.jersey_number : i+1;
+    }
+    players.push({ id:`${team}${Date.now()}${i}`, team, num, name, x, y });
   });
+  updateTeamPanel(team);
   render();
 }
 
 // ═══════════════════════════════════════════════════════════
-// RIDIMENSIONAMENTO CANVAS
+// PANNELLO SQUADRE
+// ═══════════════════════════════════════════════════════════
+function loadTeamsData(data) {
+  // Chiamato da Python dopo il caricamento pagina
+  if (data.A) { teamsData.A = data.A; updateTeamPanelFull('A'); }
+  if (data.B) { teamsData.B = data.B; updateTeamPanelFull('B'); }
+  // Aggiorna titoli
+  if (data.A && data.A.name) document.getElementById('team-a-title').textContent = data.A.name;
+  if (data.B && data.B.name) document.getElementById('team-b-title').textContent = data.B.name;
+}
+
+function updateTeamPanelFull(team) {
+  const td   = teamsData[team];
+  const cont = document.getElementById(`team-${team.toLowerCase()}-players`);
+  cont.innerHTML = '';
+  if (!td || !td.players) return;
+  td.players.forEach(p => {
+    const row   = document.createElement('div');
+    row.className = 'player-row';
+    row.title   = p.role || '';
+    const color = TEAMS_CFG[team].color;
+    const onField = players.some(pl => pl.team === team && pl.name === p.name);
+    row.innerHTML = `
+      <div class="p-dot" style="background:${color}">
+        <span style="font-size:8px;font-weight:700;color:#fff">${p.jersey_number ?? '?'}</span>
+      </div>
+      <span class="p-name">${p.name}</span>
+    `;
+    if (onField) row.classList.add('on-field');
+    cont.appendChild(row);
+  });
+}
+
+function updateTeamPanel(team) {
+  if (teamsData[team]) updateTeamPanelFull(team);
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESIZE
 // ═══════════════════════════════════════════════════════════
 function resizeCanvas() {
   const wrap = document.getElementById('field-wrap');
-  const maxW = wrap.clientWidth - 16;
-  const maxH = wrap.clientHeight - 16;
+  const maxW = wrap.clientWidth  - 12;
+  const maxH = wrap.clientHeight - 12;
   const ratio = FIELD_W / FIELD_H;
   let cw, ch;
-  if (maxW / maxH > ratio) { ch = maxH; cw = ch * ratio; }
-  else { cw = maxW; ch = cw / ratio; }
+  if (maxW/maxH > ratio) { ch=maxH; cw=ch*ratio; } else { cw=maxW; ch=cw/ratio; }
   canvas.width  = Math.floor(cw);
   canvas.height = Math.floor(ch);
   scale = cw / FIELD_W;
-  offX = 0; offY = 0;
   render();
 }
-
 window.addEventListener('resize', resizeCanvas);
 window.addEventListener('load', () => {
   resizeCanvas();
-  // Inizializza con formazione default
   applyFormation('4-4-2','A');
   applyFormation('4-4-2','B');
   setTool('select');
@@ -232,294 +350,380 @@ window.addEventListener('load', () => {
 // ═══════════════════════════════════════════════════════════
 // COORDINATE
 // ═══════════════════════════════════════════════════════════
-function toCanvas(mx, my) {
-  return [mx * scale, my * scale];
-}
-function toField(cx, cy) {
-  return [cx / scale, cy / scale];
-}
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function toC(mx,my)  { return [mx*scale, my*scale]; }
+function toF(cx,cy)  { return [cx/scale, cy/scale]; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function rect(c,cb)  { return c.getBoundingClientRect(); }
 
 // ═══════════════════════════════════════════════════════════
-// RENDERING
+// RENDER
 // ═══════════════════════════════════════════════════════════
 function render() {
-  const W = canvas.width, H = canvas.height;
+  const W=canvas.width, H=canvas.height;
   ctx.clearRect(0,0,W,H);
   drawField(W,H);
-  drawDrawings();
-  if (currentDrawing) drawCurrentDrawing();
-  drawPlayers();
-  if (ball.visible) drawBall();
+  drawings.forEach(d => renderShape(d));
+  if (currentDrawing) renderShape(currentDrawing);
+  equipment.forEach(e => drawEquipment(e));
+  players.forEach(p => drawPlayer(p));
+  if (ball.visible) drawBall(ball.x, ball.y, false);
 }
 
-function drawField(W, H) {
-  // Fondo verde
-  const grad = ctx.createLinearGradient(0,0,0,H);
-  grad.addColorStop(0, '#1a4a1a');
-  grad.addColorStop(0.5, '#1e5a1e');
-  grad.addColorStop(1, '#1a4a1a');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0,0,W,H);
-
-  // Strisce campo
-  const stripes = 8;
+// ── Campo ───────────────────────────────────────────────────
+function drawField(W,H) {
+  // Strisce
+  const stripes=8;
   for (let i=0;i<stripes;i++) {
-    if (i%2===0) {
-      ctx.fillStyle = 'rgba(0,0,0,0.06)';
-      ctx.fillRect(i*(W/stripes),0,W/stripes,H);
-    }
+    ctx.fillStyle = i%2===0 ? '#1e5a1e' : '#1a4e1a';
+    ctx.fillRect(i*(W/stripes),0,W/stripes,H);
   }
-
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-  ctx.lineWidth = Math.max(1, scale * 0.12);
-
-  // Bordo campo
+  ctx.strokeStyle='rgba(255,255,255,0.85)';
+  ctx.lineWidth=Math.max(1,scale*0.13);
   ctx.strokeRect(0,0,W,H);
-
   // Centrocampo
   ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
-
-  // Cerchio centrocampo (r=9.15m)
-  const cr = 9.15 * scale;
-  ctx.beginPath(); ctx.arc(W/2, H/2, cr, 0, Math.PI*2); ctx.stroke();
-  // Punto centrocampo
+  // Cerchio
+  ctx.beginPath(); ctx.arc(W/2,H/2,9.15*scale,0,Math.PI*2); ctx.stroke();
   ctx.fillStyle='rgba(255,255,255,0.85)';
-  ctx.beginPath(); ctx.arc(W/2,H/2,3*scale*0.12+1,0,Math.PI*2); ctx.fill();
-
-  // Aree di rigore (16.5m x 40.32m)
-  const aW = 16.5*scale, aH = 40.32*scale, aY = (H-aH)/2;
-  ctx.strokeRect(0, aY, aW, aH);                    // sinistra
-  ctx.strokeRect(W-aW, aY, aW, aH);                 // destra
-
-  // Aree piccole (5.5m x 18.32m)
-  const sW = 5.5*scale, sH = 18.32*scale, sY = (H-sH)/2;
-  ctx.strokeRect(0, sY, sW, sH);
-  ctx.strokeRect(W-sW, sY, sW, sH);
-
-  // Dischetti rigore (11m)
-  const pk = 11*scale;
+  ctx.beginPath(); ctx.arc(W/2,H/2,2.5,0,Math.PI*2); ctx.fill();
+  // Aree grandi
+  const aW=16.5*scale, aH=40.32*scale, aY=(H-aH)/2;
+  ctx.strokeRect(0,aY,aW,aH); ctx.strokeRect(W-aW,aY,aW,aH);
+  // Aree piccole
+  const sW=5.5*scale, sH=18.32*scale, sY=(H-sH)/2;
+  ctx.strokeRect(0,sY,sW,sH); ctx.strokeRect(W-sW,sY,sW,sH);
+  // Dischetti
+  const pk=11*scale;
   ctx.fillStyle='rgba(255,255,255,0.85)';
-  ctx.beginPath(); ctx.arc(pk, H/2, 2.5, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(W-pk, H/2, 2.5, 0, Math.PI*2); ctx.fill();
-
-  // Archi rigore
-  ctx.beginPath(); ctx.arc(pk, H/2, 9.15*scale, -Math.PI*0.29, Math.PI*0.29); ctx.stroke();
-  ctx.beginPath(); ctx.arc(W-pk, H/2, 9.15*scale, Math.PI*0.71, Math.PI*1.29); ctx.stroke();
-
-  // Porte (7.32m x 2.44m)
-  const gW = 2.44*scale, gH = 7.32*scale, gY = (H-gH)/2;
-  ctx.strokeRect(-gW, gY, gW, gH);
-  ctx.strokeRect(W, gY, gW, gH);
-
-  // Angoli campo (r=1m)
-  const ar = 1*scale;
+  ctx.beginPath(); ctx.arc(pk,H/2,2.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(W-pk,H/2,2.5,0,Math.PI*2); ctx.fill();
+  // Archi area
+  ctx.beginPath(); ctx.arc(pk,H/2,9.15*scale,-Math.PI*0.29,Math.PI*0.29); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W-pk,H/2,9.15*scale,Math.PI*0.71,Math.PI*1.29); ctx.stroke();
+  // Porte
+  const gW=2.44*scale, gH=7.32*scale, gY=(H-gH)/2;
+  ctx.strokeRect(-gW,gY,gW,gH); ctx.strokeRect(W,gY,gW,gH);
+  // Angoli
+  const ar=1*scale;
   ctx.beginPath(); ctx.arc(0,0,ar,0,Math.PI/2); ctx.stroke();
   ctx.beginPath(); ctx.arc(W,0,ar,Math.PI/2,Math.PI); ctx.stroke();
   ctx.beginPath(); ctx.arc(0,H,ar,-Math.PI/2,0); ctx.stroke();
   ctx.beginPath(); ctx.arc(W,H,ar,Math.PI,Math.PI*1.5); ctx.stroke();
 }
 
-function drawPlayers() {
-  const r = Math.max(10, scale * 1.1);
-  players.forEach(p => {
-    const [cx,cy] = toCanvas(p.x, p.y);
-    const color = TEAMS[p.team].color;
-    // Ombra
-    ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=6;
-    // Cerchio pieno
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
-    ctx.shadowBlur=0;
-    // Bordo bianco
-    ctx.strokeStyle='#fff'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-    // Numero
-    ctx.fillStyle='#fff';
-    ctx.font = `bold ${Math.max(8, r*0.9)}px Arial`;
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(p.num, cx, cy);
-  });
-  ctx.shadowBlur=0;
-}
-
-function drawBall() {
-  const [cx,cy] = toCanvas(ball.x, ball.y);
-  const r = Math.max(6, scale * 0.7);
-  ctx.shadowColor='rgba(0,0,0,0.6)'; ctx.shadowBlur=8;
-  ctx.fillStyle='#fff';
+// ── Pedine ─────────────────────────────────────────────────
+function drawPlayer(p) {
+  const [cx,cy]=toC(p.x,p.y);
+  const r=Math.max(10,scale*1.1);
+  const color=TEAMS_CFG[p.team].color;
+  ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=5;
+  ctx.fillStyle=color;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
   ctx.shadowBlur=0;
-  ctx.strokeStyle='#222'; ctx.lineWidth=1.5;
+  ctx.strokeStyle='#fff'; ctx.lineWidth=2;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-  // pentagono semplificato
-  ctx.strokeStyle='#555'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.arc(cx,cy,r*0.45,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle='#fff';
+  ctx.font=`bold ${Math.max(8,r*0.85)}px Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(String(p.num), cx, cy);
+  // Nome sotto (se disponibile e campo abbastanza grande)
+  if (p.name && scale > 3) {
+    ctx.font=`${Math.max(7,scale*0.6)}px Arial`;
+    ctx.fillStyle='rgba(255,255,255,0.8)';
+    ctx.fillText(p.name.split(' ').pop(), cx, cy+r+7);
+  }
 }
 
-// ═══════════════════════════════════════════════════════════
-// DISEGNI
-// ═══════════════════════════════════════════════════════════
-function drawArrow(x1,y1,x2,y2,color,lw) {
-  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=lw;
-  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-  const angle=Math.atan2(y2-y1,x2-x1);
-  const aLen=Math.max(10,lw*4);
+// ── Pallone (bianco/nero realistico) ──────────────────────
+function drawBall(mx, my, small=false) {
+  const [cx,cy]=toC(mx,my);
+  const r=small ? Math.max(5,scale*0.55) : Math.max(7,scale*0.78);
+  ctx.shadowColor='rgba(0,0,0,0.6)'; ctx.shadowBlur=6;
+  // Base bianca
+  ctx.fillStyle='#f5f5f5';
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='#222'; ctx.lineWidth=Math.max(0.5,r*0.07);
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  // Pentagono centrale nero
+  ctx.fillStyle='#111';
+  drawPolygon(cx,cy,r*0.32,5,-Math.PI/2);
+  ctx.fill();
+  // 5 patch nere esterne
+  for (let i=0;i<5;i++) {
+    const ang=(i*2*Math.PI/5)-Math.PI/2;
+    const px=cx+Math.cos(ang)*r*0.58;
+    const py=cy+Math.sin(ang)*r*0.58;
+    drawPolygon(px,py,r*0.23,5,ang+Math.PI+Math.PI/5);
+    ctx.fill();
+  }
+}
+function drawPolygon(cx,cy,r,sides,startAngle) {
   ctx.beginPath();
-  ctx.moveTo(x2,y2);
-  ctx.lineTo(x2-aLen*Math.cos(angle-0.4), y2-aLen*Math.sin(angle-0.4));
-  ctx.lineTo(x2-aLen*Math.cos(angle+0.4), y2-aLen*Math.sin(angle+0.4));
-  ctx.closePath(); ctx.fill();
+  for (let i=0;i<sides;i++) {
+    const a=startAngle+(i*2*Math.PI/sides);
+    i===0 ? ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a))
+           : ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));
+  }
+  ctx.closePath();
 }
 
-function drawDrawings() {
-  drawings.forEach(d => renderDrawing(d));
-}
-function drawCurrentDrawing() {
-  if (currentDrawing) renderDrawing(currentDrawing);
+// ── Attrezzatura ───────────────────────────────────────────
+function drawEquipment(e) {
+  const [cx,cy]=toC(e.x,e.y);
+  ctx.save();
+  ctx.translate(cx,cy);
+  const s=Math.max(8,scale*0.9);
+  switch(e.type) {
+    case 'cone': drawCone(s); break;
+    case 'cinesino': drawCinesino(s); break;
+    case 'mini_goal': drawMiniGoal(s); break;
+    case 'hurdle': drawHurdle(s); break;
+    case 'mannequin': drawMannequin(s); break;
+    case 'pole': drawPole(s); break;
+    case 'extra_ball': ctx.translate(-cx,-cy); drawBall(e.x,e.y,true); ctx.translate(cx,cy); break;
+  }
+  ctx.restore();
 }
 
-function renderDrawing(d) {
-  const lw = Math.max(2, scale * 0.18);
+function drawCone(s) {
+  // Cono arancione visto dall'alto = triangolo isoscele
+  ctx.fillStyle='#f97316';
+  ctx.strokeStyle='#c2410c'; ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.moveTo(0,-s);
+  ctx.lineTo(-s*0.7,s*0.5);
+  ctx.lineTo(s*0.7,s*0.5);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#fed7aa';
+  ctx.beginPath(); ctx.ellipse(0,s*0.5,s*0.7,s*0.2,0,0,Math.PI*2); ctx.fill();
+}
+
+function drawCinesino(s) {
+  // Disco piatto giallo
+  ctx.fillStyle='#facc15';
+  ctx.strokeStyle='#ca8a04'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.ellipse(0,0,s,s*0.35,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.ellipse(-s*0.2,-s*0.08,s*0.25,s*0.1,0,0,Math.PI*2); ctx.fill();
+}
+
+function drawMiniGoal(s) {
+  // Porta piccola vista dall'alto
+  ctx.strokeStyle='#ffffff'; ctx.lineWidth=Math.max(1.5,s*0.15);
+  ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(-s*1.2,-s*0.4);
+  ctx.lineTo(-s*1.2, s*0.4);
+  ctx.moveTo( s*1.2,-s*0.4);
+  ctx.lineTo( s*1.2, s*0.4);
+  ctx.moveTo(-s*1.2,-s*0.4);
+  ctx.lineTo( s*1.2,-s*0.4);
+  ctx.stroke();
+  // Rete (linee diagonali)
+  ctx.strokeStyle='rgba(200,200,200,0.4)'; ctx.lineWidth=0.7;
+  for (let i=-3;i<=3;i++) {
+    ctx.beginPath(); ctx.moveTo(i*s*0.4,-s*0.4); ctx.lineTo(i*s*0.4,s*0); ctx.stroke();
+  }
+}
+
+function drawHurdle(s) {
+  // Ostacolo rosso/giallo
+  ctx.fillStyle='#ef4444';
+  ctx.strokeStyle='#991b1b'; ctx.lineWidth=1;
+  ctx.fillRect(-s,-s*0.25,s*2,s*0.5);
+  ctx.strokeRect(-s,-s*0.25,s*2,s*0.5);
+  // Strisce gialle
+  ctx.fillStyle='#facc15';
+  for (let i=0;i<3;i++) {
+    ctx.fillRect(-s+i*s*0.65,  -s*0.25, s*0.28, s*0.5);
+  }
+}
+
+function drawMannequin(s) {
+  // Manichino giallo (cerchio corpo + testa)
+  ctx.fillStyle='#facc15'; ctx.strokeStyle='#a16207'; ctx.lineWidth=1.2;
+  // Corpo
+  ctx.beginPath(); ctx.ellipse(0,s*0.2,s*0.5,s*0.7,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  // Testa
+  ctx.fillStyle='#fef08a';
+  ctx.beginPath(); ctx.arc(0,-s*0.55,s*0.3,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  // X sul corpo
+  ctx.strokeStyle='rgba(100,70,0,0.5)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-s*0.3,-s*0.1); ctx.lineTo(s*0.3,s*0.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(s*0.3,-s*0.1); ctx.lineTo(-s*0.3,s*0.5); ctx.stroke();
+}
+
+function drawPole(s) {
+  // Paletto rosso
+  ctx.fillStyle='#ef4444'; ctx.strokeStyle='#7f1d1d'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.ellipse(0,0,s*0.3,s*0.3,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  // Linea verticale
+  ctx.strokeStyle='#ef4444'; ctx.lineWidth=Math.max(2,s*0.25);
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-s*1.5); ctx.stroke();
+  // Striscia bianca
+  ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(1,s*0.1);
+  ctx.beginPath(); ctx.moveTo(0,-s*0.4); ctx.lineTo(0,-s*0.8); ctx.stroke();
+}
+
+// ── Disegni ─────────────────────────────────────────────────
+function renderShape(d) {
+  const lw=Math.max(2,scale*0.18);
+  ctx.save();
   if (d.type==='arrow') {
-    const [x1,y1]=toCanvas(d.x1,d.y1), [x2,y2]=toCanvas(d.x2,d.y2);
+    const [x1,y1]=toC(d.x1,d.y1),[x2,y2]=toC(d.x2,d.y2);
     drawArrow(x1,y1,x2,y2,d.color,lw);
   } else if (d.type==='line') {
-    const [x1,y1]=toCanvas(d.x1,d.y1), [x2,y2]=toCanvas(d.x2,d.y2);
-    ctx.strokeStyle=d.color; ctx.lineWidth=lw;
-    ctx.setLineDash([6,4]);
+    const [x1,y1]=toC(d.x1,d.y1),[x2,y2]=toC(d.x2,d.y2);
+    ctx.strokeStyle=d.color; ctx.lineWidth=lw; ctx.setLineDash([6,4]);
     ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
     ctx.setLineDash([]);
   } else if (d.type==='circle') {
-    const [cx,cy]=toCanvas(d.cx,d.cy);
-    const r=Math.sqrt((d.r*scale)**2+(d.r*scale)**2)/Math.sqrt(2);
+    const [cx,cy]=toC(d.cx,d.cy);
     ctx.strokeStyle=d.color; ctx.lineWidth=lw;
     ctx.beginPath(); ctx.arc(cx,cy,Math.abs(d.r*scale),0,Math.PI*2); ctx.stroke();
   } else if (d.type==='zone') {
-    const [x1,y1]=toCanvas(d.x1,d.y1), [x2,y2]=toCanvas(d.x2,d.y2);
-    ctx.fillStyle=d.color+'33';
-    ctx.strokeStyle=d.color;
-    ctx.lineWidth=lw;
+    const [x1,y1]=toC(d.x1,d.y1),[x2,y2]=toC(d.x2,d.y2);
+    ctx.fillStyle=d.color+'33'; ctx.strokeStyle=d.color; ctx.lineWidth=lw;
     ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));
     ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));
   }
+  ctx.restore();
+}
+
+function drawArrow(x1,y1,x2,y2,color,lw) {
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=lw;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  const angle=Math.atan2(y2-y1,x2-x1), aLen=Math.max(10,lw*4);
+  ctx.beginPath();
+  ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-aLen*Math.cos(angle-0.4),y2-aLen*Math.sin(angle-0.4));
+  ctx.lineTo(x2-aLen*Math.cos(angle+0.4),y2-aLen*Math.sin(angle+0.4));
+  ctx.closePath(); ctx.fill();
 }
 
 // ═══════════════════════════════════════════════════════════
 // HIT TEST
 // ═══════════════════════════════════════════════════════════
-function hitPlayer(cx, cy) {
-  const r = Math.max(10, scale * 1.1) + 4;
+function hitPlayer(cx,cy) {
+  const r=Math.max(10,scale*1.1)+4;
   for (let i=players.length-1;i>=0;i--) {
-    const [px,py]=toCanvas(players[i].x,players[i].y);
-    if ((cx-px)**2+(cy-py)**2 < r*r) return players[i];
+    const [px,py]=toC(players[i].x,players[i].y);
+    if ((cx-px)**2+(cy-py)**2<r*r) return players[i];
   }
   return null;
 }
-
-function hitBall(cx, cy) {
-  const r = Math.max(6, scale * 0.7) + 4;
-  const [bx,by]=toCanvas(ball.x,ball.y);
-  return (cx-bx)**2+(cy-by)**2 < r*r;
+function hitEquipment(cx,cy) {
+  const r=Math.max(10,scale*0.9)+4;
+  for (let i=equipment.length-1;i>=0;i--) {
+    const [ex,ey]=toC(equipment[i].x,equipment[i].y);
+    if ((cx-ex)**2+(cy-ey)**2<r*r) return equipment[i];
+  }
+  return null;
+}
+function hitBall(cx,cy) {
+  const [bx,by]=toC(ball.x,ball.y);
+  const r=Math.max(7,scale*0.78)+4;
+  return (cx-bx)**2+(cy-by)**2<r*r;
 }
 
 // ═══════════════════════════════════════════════════════════
 // EVENTI MOUSE
 // ═══════════════════════════════════════════════════════════
 canvas.addEventListener('mousedown', e => {
-  const rect=canvas.getBoundingClientRect();
-  const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
-  const [fx,fy]=toField(cx,cy);
+  const r=canvas.getBoundingClientRect();
+  const cx=e.clientX-r.left, cy=e.clientY-r.top;
+  const [fx,fy]=toF(cx,cy);
+
+  // Modalità piazza oggetto
+  if (placeTool) {
+    placeObject(placeTool, fx, fy);
+    return;
+  }
 
   if (currentTool==='select') {
-    // Prova drag palla
-    if (ball.visible && hitBall(cx,cy)) {
-      dragBall=true; return;
-    }
-    // Prova drag pedina
+    if (ball.visible && hitBall(cx,cy)) { dragObj={kind:'ball'}; return; }
     const p=hitPlayer(cx,cy);
     if (p) {
-      dragPlayer=p;
-      const [px,py]=toCanvas(p.x,p.y);
-      dragOffX=cx-px; dragOffY=cy-py;
+      dragObj={kind:'player',ref:p};
+      const [px,py]=toC(p.x,p.y);
+      dragOff={x:cx-px,y:cy-py}; return;
     }
+    const eq=hitEquipment(cx,cy);
+    if (eq) {
+      dragObj={kind:'equipment',ref:eq};
+      const [ex,ey]=toC(eq.x,eq.y);
+      dragOff={x:cx-ex,y:cy-ey}; return;
+    }
+  } else if (currentTool==='erase') {
+    const p=hitPlayer(cx,cy);
+    if (p) { players=players.filter(x=>x!==p); render(); return; }
+    const eq=hitEquipment(cx,cy);
+    if (eq) { equipment=equipment.filter(x=>x!==eq); render(); return; }
   } else {
-    // Avvia disegno
-    drawStart={x:fx, y:fy, cx, cy};
-    currentDrawing={type:currentTool, color:currentColor, x1:fx, y1:fy, x2:fx, y2:fy,
-                    cx:fx, cy:fy, r:0};
+    drawStart={x:fx,y:fy};
+    currentDrawing={type:currentTool,color:currentColor,x1:fx,y1:fy,x2:fx,y2:fy,cx:fx,cy:fy,r:0};
   }
 });
 
 canvas.addEventListener('mousemove', e => {
-  const rect=canvas.getBoundingClientRect();
-  const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
-  const [fx,fy]=toField(cx,cy);
+  const r=canvas.getBoundingClientRect();
+  const cx=e.clientX-r.left, cy=e.clientY-r.top;
+  const [fx,fy]=toF(cx,cy);
 
-  if (dragBall) {
-    ball.x=clamp(fx,0,FIELD_W); ball.y=clamp(fy,0,FIELD_H); render(); return;
-  }
-  if (dragPlayer) {
-    const [nx,ny]=toField(cx-dragOffX, cy-dragOffY);
-    dragPlayer.x=clamp(nx,0,FIELD_W); dragPlayer.y=clamp(ny,0,FIELD_H);
+  if (dragObj) {
+    if (dragObj.kind==='ball') {
+      ball.x=clamp(fx,0,FIELD_W); ball.y=clamp(fy,0,FIELD_H);
+    } else if (dragObj.kind==='player') {
+      const [nx,ny]=toF(cx-dragOff.x,cy-dragOff.y);
+      dragObj.ref.x=clamp(nx,0,FIELD_W); dragObj.ref.y=clamp(ny,0,FIELD_H);
+    } else if (dragObj.kind==='equipment') {
+      const [nx,ny]=toF(cx-dragOff.x,cy-dragOff.y);
+      dragObj.ref.x=clamp(nx,0,FIELD_W); dragObj.ref.y=clamp(ny,0,FIELD_H);
+    }
     render(); return;
   }
+
   if (currentDrawing && drawStart) {
-    if (currentTool==='arrow'||currentTool==='line') {
-      currentDrawing.x2=fx; currentDrawing.y2=fy;
-    } else if (currentTool==='circle') {
-      const dx=fx-drawStart.x, dy=fy-drawStart.y;
-      currentDrawing.r=Math.sqrt(dx*dx+dy*dy);
-    } else if (currentTool==='zone') {
-      currentDrawing.x2=fx; currentDrawing.y2=fy;
-    }
+    if (currentTool==='arrow'||currentTool==='line') { currentDrawing.x2=fx; currentDrawing.y2=fy; }
+    else if (currentTool==='circle') { const dx=fx-drawStart.x,dy=fy-drawStart.y; currentDrawing.r=Math.sqrt(dx*dx+dy*dy); }
+    else if (currentTool==='zone')   { currentDrawing.x2=fx; currentDrawing.y2=fy; }
     render();
   }
 
   // Cursore
+  if (placeTool) { canvas.style.cursor='copy'; return; }
   if (currentTool==='select') {
-    const over=hitPlayer(cx,cy)||(ball.visible&&hitBall(cx,cy));
-    canvas.style.cursor=over?'grab':'default';
-  } else {
-    canvas.style.cursor='crosshair';
-  }
+    canvas.style.cursor=(hitPlayer(cx,cy)||hitEquipment(cx,cy)||(ball.visible&&hitBall(cx,cy))) ? 'grab' : 'default';
+  } else if (currentTool==='erase') { canvas.style.cursor='not-allowed'; }
+  else { canvas.style.cursor='crosshair'; }
 });
 
 canvas.addEventListener('mouseup', e => {
-  if (dragBall) { dragBall=false; return; }
-  if (dragPlayer) { dragPlayer=null; render(); return; }
+  if (dragObj) { dragObj=null; render(); return; }
   if (currentDrawing && drawStart) {
-    const rect=canvas.getBoundingClientRect();
-    const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
-    const [fx,fy]=toField(cx,cy);
-    // Salva solo se abbastanza grande
+    const r=canvas.getBoundingClientRect();
+    const cx=e.clientX-r.left, cy=e.clientY-r.top;
+    const [fx,fy]=toF(cx,cy);
     const dist=Math.sqrt((fx-drawStart.x)**2+(fy-drawStart.y)**2);
-    if (dist > 0.5) {
-      if (currentTool==='arrow'||currentTool==='line') {
-        drawings.push({...currentDrawing, x2:fx, y2:fy});
-      } else if (currentTool==='circle') {
-        const dx=fx-drawStart.x, dy=fy-drawStart.y;
-        drawings.push({...currentDrawing, r:Math.sqrt(dx*dx+dy*dy)});
-      } else if (currentTool==='zone') {
-        drawings.push({...currentDrawing, x2:fx, y2:fy});
-      }
+    if (dist>0.5) {
+      if (currentTool==='arrow'||currentTool==='line') drawings.push({...currentDrawing,x2:fx,y2:fy});
+      else if (currentTool==='circle') { const dx=fx-drawStart.x,dy=fy-drawStart.y; drawings.push({...currentDrawing,r:Math.sqrt(dx*dx+dy*dy)}); }
+      else if (currentTool==='zone') drawings.push({...currentDrawing,x2:fx,y2:fy});
     }
-    currentDrawing=null; drawStart=null;
-    render();
+    currentDrawing=null; drawStart=null; render();
   }
 });
 
 canvas.addEventListener('mouseleave', () => {
-  dragPlayer=null; dragBall=false;
-  currentDrawing=null; drawStart=null;
-  render();
+  dragObj=null; currentDrawing=null; drawStart=null; render();
 });
 
-// Touch support
-canvas.addEventListener('touchstart', e => { e.preventDefault(); simulateMouse(e,'mousedown'); }, {passive:false});
-canvas.addEventListener('touchmove', e => { e.preventDefault(); simulateMouse(e,'mousemove'); }, {passive:false});
-canvas.addEventListener('touchend', e => { e.preventDefault(); simulateMouse(e,'mouseup'); }, {passive:false});
-function simulateMouse(e, type) {
+// Touch
+canvas.addEventListener('touchstart', e=>{e.preventDefault();simulateMouse(e,'mousedown');},{passive:false});
+canvas.addEventListener('touchmove',  e=>{e.preventDefault();simulateMouse(e,'mousemove');},{passive:false});
+canvas.addEventListener('touchend',   e=>{e.preventDefault();simulateMouse(e,'mouseup');},{passive:false});
+function simulateMouse(e,type) {
   const t=e.touches[0]||e.changedTouches[0];
   canvas.dispatchEvent(new MouseEvent(type,{clientX:t.clientX,clientY:t.clientY,bubbles:true}));
 }
@@ -528,35 +732,131 @@ function simulateMouse(e, type) {
 // TOOLBAR ACTIONS
 // ═══════════════════════════════════════════════════════════
 function setTool(t) {
-  currentTool=t;
+  currentTool=t; placeTool=null;
   document.querySelectorAll('.tb-btn').forEach(b=>b.classList.remove('active'));
-  const btn=document.getElementById('tool-'+t);
-  if(btn) btn.classList.add('active');
+  const btn=document.getElementById('tool-'+t); if(btn) btn.classList.add('active');
+  document.querySelectorAll('.tool-item').forEach(b=>b.classList.remove('active'));
 }
 
-function setColor(c) { currentColor=c; }
+function setPlaceTool(t) {
+  placeTool=t; currentTool='select';
+  document.querySelectorAll('.tool-item').forEach(b=>b.classList.remove('active'));
+  const el=document.getElementById('ptool-'+t); if(el) el.classList.add('active');
+  document.querySelectorAll('.tb-btn').forEach(b=>b.classList.remove('active'));
+  canvas.style.cursor='copy';
+}
+
+function placeObject(type, fx, fy) {
+  const x=clamp(fx,0,FIELD_W), y=clamp(fy,0,FIELD_H);
+  if (type==='player_A') {
+    const num=players.filter(p=>p.team==='A').length+1;
+    players.push({id:'A'+Date.now(),team:'A',num,name:'',x,y});
+  } else if (type==='player_B') {
+    const num=players.filter(p=>p.team==='B').length+1;
+    players.push({id:'B'+Date.now(),team:'B',num,name:'',x,y});
+  } else {
+    equipment.push({id:'eq'+Date.now(),type,x,y});
+  }
+  render();
+}
+
+function setColor(el, c) {
+  currentColor=c;
+  document.querySelectorAll('.color-dot').forEach(d=>d.classList.remove('active'));
+  el.classList.add('active');
+}
 
 function clearDrawings() { drawings=[]; render(); }
 
 function resetAll() {
-  drawings=[];
-  players=[];
-  ball={x:FIELD_W/2, y:FIELD_H/2, visible:true};
+  drawings=[]; players=[]; equipment=[];
+  ball={x:FIELD_W/2,y:FIELD_H/2,visible:true};
+  keyframes=[]; updateAnimBar();
   applyFormation('4-4-2','A');
   applyFormation('4-4-2','B');
   render();
 }
 
-function placeBall() {
-  ball={x:FIELD_W/2, y:FIELD_H/2, visible:true};
-  render();
-}
+function placeBallCenter() { ball={x:FIELD_W/2,y:FIELD_H/2,visible:true}; render(); }
 
 function exportPNG() {
   const link=document.createElement('a');
   link.download='lavagna_tattica.png';
   link.href=canvas.toDataURL('image/png');
   link.click();
+}
+
+// ═══════════════════════════════════════════════════════════
+// ANIMAZIONE
+// ═══════════════════════════════════════════════════════════
+function captureState() {
+  return {
+    players:  players.map(p=>({...p})),
+    equipment:equipment.map(e=>({...e})),
+    ball:     {...ball},
+    drawings: drawings.map(d=>({...d}))
+  };
+}
+
+function applyState(state) {
+  players=state.players.map(p=>({...p}));
+  equipment=state.equipment.map(e=>({...e}));
+  ball={...state.ball};
+  drawings=state.drawings.map(d=>({...d}));
+  render();
+}
+
+function toggleRecord() {
+  if (animPlaying) return;
+  keyframes.push(captureState());
+  updateAnimBar();
+  // Flash feedback
+  const btn=document.getElementById('btn-record');
+  btn.textContent='✅ Frame '+keyframes.length;
+  setTimeout(()=>{ btn.textContent='⏺ Registra frame'; },800);
+}
+
+function clearKeyframes() {
+  if (animPlaying) stopAnimation();
+  keyframes=[]; updateAnimBar();
+}
+
+function playAnimation() {
+  if (keyframes.length<2) { alert('Registra almeno 2 frame per l\'animazione.'); return; }
+  if (animPlaying) { stopAnimation(); return; }
+  animPlaying=true; animFrame=0;
+  document.getElementById('btn-play').textContent='⏹ Stop';
+  const speed=parseInt(document.getElementById('anim-speed').value);
+  function step() {
+    if (!animPlaying) return;
+    applyState(keyframes[animFrame]);
+    updateAnimBar();
+    animFrame=(animFrame+1)%keyframes.length;
+    animTimer=setTimeout(step, speed);
+  }
+  step();
+}
+
+function stopAnimation() {
+  animPlaying=false; clearTimeout(animTimer);
+  document.getElementById('btn-play').textContent='▶ Play';
+}
+
+function updateAnimBar() {
+  const n=keyframes.length;
+  document.getElementById('anim-frames').textContent=`${n} frame${n!==1?'s':''}`;
+  document.getElementById('btn-play').disabled=n<2;
+  const pct=n>1 ? (animFrame/(n-1))*100 : 0;
+  document.getElementById('anim-progress').style.width=pct+'%';
+}
+
+function seekTimeline(e) {
+  if (keyframes.length===0 || animPlaying) return;
+  const r=e.currentTarget.getBoundingClientRect();
+  const pct=(e.clientX-r.left)/r.width;
+  animFrame=Math.min(keyframes.length-1, Math.floor(pct*keyframes.length));
+  applyState(keyframes[animFrame]);
+  updateAnimBar();
 }
 </script>
 </body>

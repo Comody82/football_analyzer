@@ -1429,13 +1429,38 @@ class WorkspacePage(QWidget):
 
     def _open_interactive_board(self):
         """Apre la Lavagna Tattica Interattiva in una finestra separata."""
+        import json as _json
         from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
         from PyQt5.QtCore import QUrl
         from pathlib import Path as _Path
 
+        # Legge dati squadre collegate al progetto (se disponibili)
+        teams_payload = {"A": None, "B": None}
+        try:
+            if hasattr(self, '_team_links') and self._team_links:
+                from teams_repository import TeamsRepository
+                repo = TeamsRepository()
+                links = self._team_links
+                for slot, key in [('A', 'team_0'), ('B', 'team_1')]:
+                    tid = getattr(links, f'_{key}_id', None) or (
+                        links._links.get(key) if hasattr(links, '_links') else None)
+                    if tid:
+                        team = repo.get_team(tid)
+                        if team:
+                            teams_payload[slot] = {
+                                "name": team.name,
+                                "color": team.color or ("#3b82f6" if slot=='A' else "#ef4444"),
+                                "players": [
+                                    {"name": p.name, "jersey_number": p.jersey_number, "role": p.role}
+                                    for p in team.players
+                                ]
+                            }
+        except Exception:
+            pass
+
         dlg = QDialog(self.window())
-        dlg.setWindowTitle("🧩 Lavagna Tattica Interattiva")
-        dlg.resize(1100, 720)
+        dlg.setWindowTitle("Lavagna Tattica Interattiva")
+        dlg.resize(1200, 750)
         dlg.setStyleSheet("background:#0B1220;")
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1445,6 +1470,12 @@ class WorkspacePage(QWidget):
         view.page().setBackgroundColor(QColor(0x0B, 0x12, 0x20))
         board_url = QUrl.fromLocalFile(
             str(_Path(__file__).parent / "frontend" / "interactive_board.html"))
+
+        # Inietta dati squadre dopo il caricamento della pagina
+        payload_json = _json.dumps(teams_payload)
+        view.loadFinished.connect(
+            lambda ok: view.page().runJavaScript(f"loadTeamsData({payload_json});") if ok else None
+        )
         view.load(board_url)
         layout.addWidget(view)
         dlg.exec_()
