@@ -230,6 +230,60 @@ Frame 4K raw (3840×2160) — per tutta la partita
 
 ---
 
+### 🎯 Calibrazione Dinamica Per-Frame — Video Broadcast/VEO (Prelyt Advanced)
+> Permette di calcolare una omografia diversa per ogni frame, abilitando la calibrazione su video broadcast, VEO e camere che zoomano. Senza questa feature, i video con campo parzialmente visibile non possono avere metriche precise.
+
+**Quando serve:**
+- Video VEO/Trace output (già tagliato, zooma sul gioco)
+- Broadcast TV (camera che segue l'azione)
+- Qualsiasi video dove non si vedono mai tutti e 4 gli angoli del campo insieme
+
+**Come funziona:**
+```
+Per ogni frame (o ogni N frame):
+  → Rileva linee bianche visibili (Hough transform)
+  → Identifica intersezioni note (angoli area, centrocampo, dischetti...)
+  → Matcha le intersezioni visibili contro il modello campo reale (105×68m)
+  → Calcola omografia RANSAC con i punti disponibili
+  → Salva H_frame nel tracking JSON → usata per mappare giocatori di quel frame
+```
+
+**Approcci implementativi:**
+- **Approccio 1 — Classico** (line detection): Hough + template matching — no modello pre-trainato, ma fragile con poca visibilità linee
+- **Approccio 2 — Deep Learning**: modello pre-trainato da SoccerNet-Calibration — molto più robusto, richiede integrazione PyTorch/ONNX
+
+**Sfide tecniche:**
+
+| Sfida | Difficoltà |
+|---|---|
+| Linee parzialmente visibili (metà campo) | 🔴 Alta |
+| Giocatori che coprono le linee | 🟡 Media |
+| Costo computazionale (ogni frame) | 🟡 Media |
+| Camera che zooma → scala cambia frame per frame | 🔴 Alta |
+| Stabilità tra frame (no salti omografia) | 🟡 Media |
+
+**Impatto sul sistema:**
+- Tracking JSON più pesante (1 matrice H per frame)
+- Heatmap e distanze precise anche su video broadcast
+- RunPod: +30-50% tempo analisi per la calibrazione per-frame
+- Sblocca il supporto completo a VEO, Trace, StadiumAI e simili
+
+**Prerequisiti:** Field Calibration base funzionante, tracking YOLO stabile
+
+**Stima lavoro:** 2-3 sessioni con approccio classico, 1-2 con SoccerNet pre-trainato
+
+**Dataset utile:** SoccerNet-Calibration (già citato nei dataset di riferimento)
+
+- [ ] **Rilevamento linee per-frame**: Hough transform su frame preprocessato (contrasto linee bianche)
+- [ ] **Template matching campo**: modello 2D del campo → matcha intersezioni visibili → RANSAC homography
+- [ ] **Stabilizzazione inter-frame**: smoothing della matrice H tra frame consecutivi per evitare salti
+- [ ] **Fallback graceful**: se frame ha troppe poche linee → usa H del frame precedente + flag "stimata"
+- [ ] **Integrazione modello DL** (opzionale): ONNX export del modello SoccerNet-Calibration
+- [ ] **Storage H per-frame**: salva nel tracking JSON come `{frame_id: H_matrix}`
+- [ ] **Test su video VEO reale**: validare precisione coordinate su video broadcast
+
+---
+
 ### 📐 Tracking Refinement (Prelyt Core)
 > Pulisce i dati di tracking prima che arrivino a Event Engine e Metrics Engine.
 
