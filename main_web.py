@@ -71,12 +71,16 @@ from ui.player_detection_dialog import get_video_for_detection as get_video_for_
 from ui.analysis_process_dialog import AnalysisProcessDialog, has_checkpoint
 from ui.cloud_analysis_dialog import CloudAnalysisDialog
 from ui.statistics_dialog import StatisticsDialog
+from ui.team_links_dialog import TeamLinksDialog
+from team_links import ProjectTeamLinks
 from project_repository import ProjectRepository
 from ui.hardware_check import run_hardware_check
 
 
 # Modalità workspace: "legacy" (3 WebView). d_migration rimosso (layout identico, stesso codice).
 WORKSPACE_UI_MODE = os.environ.get("FOOTBALL_WORKSPACE_UI", "legacy")
+
+APP_VERSION = "0.1.0"
 
 # Preferenze Fase 3: analisi Locale / Cloud (QSettings)
 SETTINGS_ORG = "FootballAnalyzer"
@@ -276,6 +280,8 @@ class WorkspacePage(QWidget):
         self._highlights_image_items = []
         self._analysis_in_progress = False
         self._analysis_dialog = None
+        # Team links per-progetto (associazione AI teams/tracks → registry)
+        self._team_links = self._load_team_links()
         # Fase 3: rilevamento hardware (cache a ogni avvio workspace)
         self._hardware_check_result = run_hardware_check()
 
@@ -299,6 +305,12 @@ class WorkspacePage(QWidget):
         project_chip.setObjectName("workspaceProjectChip")
         topbar_layout.addWidget(project_chip, 0, Qt.AlignVCenter)
         topbar_layout.addStretch(1)
+
+        btn_team_links = QPushButton("🔗 Collega Squadre")
+        btn_team_links.setProperty("class", "workspaceTopBtn")
+        btn_team_links.setToolTip("Associa le squadre/giocatori rilevati dall'IA al registry globale")
+        btn_team_links.clicked.connect(self._on_team_links_clicked)
+        topbar_layout.addWidget(btn_team_links, 0, Qt.AlignVCenter)
 
         btn_stats = QPushButton("Statistiche")
         btn_stats.setProperty("class", "workspaceTopBtn")
@@ -463,6 +475,16 @@ class WorkspacePage(QWidget):
         self.web_view_tactical.load(tactical_url)
         center_layout.addWidget(self.web_view_tactical, 0)
 
+        self.web_view_heatmap = CustomWebEngineView()
+        self.web_view_heatmap.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+        self.web_view_heatmap.page().setBackgroundColor(QColor(0x0B, 0x13, 0x20))
+        self.web_view_heatmap.setStyleSheet("background: transparent; border: none;")
+        self.web_view_heatmap.setFixedHeight(260)
+        self.web_view_heatmap.hide()
+        heatmap_url = QUrl.fromLocalFile(str(Path(__file__).parent / "frontend" / "heatmap.html"))
+        self.web_view_heatmap.load(heatmap_url)
+        center_layout.addWidget(self.web_view_heatmap, 0)
+
         self._center_stack.addWidget(center_normal_widget)
 
         # Colonna destra: WebView Clip/Statistiche
@@ -508,9 +530,11 @@ class WorkspacePage(QWidget):
         self.web_view_center_controls.page().setWebChannel(self.channel)
         self.web_view_right.page().setWebChannel(self.channel)
         self.web_view_tactical.page().setWebChannel(self.channel)
+        self.web_view_heatmap.page().setWebChannel(self.channel)
         self.btn_open_video_overlay.clicked.connect(self._handle_open_video_request)
         self.backend.videoLoaded.connect(lambda _path: self._update_open_video_cta_visibility())
         self.backend.videoLoaded.connect(lambda _path: self._load_tracking_overlay())
+        self.backend.toastRequested.connect(self._show_toast_on_main_view)
         self.web_view_left.loadFinished.connect(lambda ok: self._on_any_webview_loaded("left", ok))
         self.web_view_center_controls.loadFinished.connect(lambda ok: self._on_any_webview_loaded("center", ok))
         self.web_view_right.loadFinished.connect(lambda ok: self._on_any_webview_loaded("right", ok))
@@ -607,6 +631,29 @@ class WorkspacePage(QWidget):
         ok = self.persist_project()
         self._show_save_check_feedback(bool(ok))
 
+    def _load_team_links(self) -> "ProjectTeamLinks":
+        """Carica (o crea) il file team_links per il progetto corrente."""
+        try:
+            links_path = self.project_repository.get_team_links_path(self.project_id)
+            return ProjectTeamLinks(links_path)
+        except Exception:
+            # Fallback: oggetto vuoto in memoria
+            from team_links import ProjectTeamLinks as _TL
+            return _TL(":memory:")  # path non valido → non salva, ma non crasha
+
+    def _on_team_links_clicked(self):
+        """Apre il dialogo per collegare squadre/giocatori AI → registry globale."""
+        project_dir = self._get_project_analysis_dir()
+        if not project_dir:
+            QMessageBox.warning(self.window(), "Collega Squadre", "Progetto non valido.")
+            return
+        # Ricarica i links freschi dal disco
+        self._team_links = self._load_team_links()
+        dlg = TeamLinksDialog(project_dir, self._team_links, parent=self.window())
+        dlg.exec_()
+        # Dopo la chiusura, ricarica per avere il dato aggiornato in memoria
+        self._team_links = self._load_team_links()
+
     def _on_statistics_clicked(self):
         """Apre il dialog Statistiche con possesso %, passaggi, tiri, recuperi, pressing e metriche."""
         project_dir = self._get_project_analysis_dir()
@@ -622,7 +669,14 @@ class WorkspacePage(QWidget):
                 "Esegui prima un'analisi automatica completa per vedere possesso, passaggi e metriche.",
             )
             return
-        dlg = StatisticsDialog(project_dir, parent=self.window())
+        # Passa i nomi reali delle squadre dal registry (se configurati)
+        team_names = None
+        team_colors = None
+        if hasattr(self, "_team_links") and self._team_links:
+            team_names = self._team_links.get_team_names_dict()
+            team_colors = self._team_links.get_team_colors_dict()
+        dlg = StatisticsDialog(project_dir, team_names=team_names, team_colors=team_colors,
+                               parent=self.window())
         dlg.exec_()
 
     def _get_project_analysis_dir(self):
@@ -697,6 +751,11 @@ class WorkspacePage(QWidget):
         p = Path(saved_path)
         if not p.exists():
             logging.warning("Video salvato non trovato: %s", saved_path)
+            self._video_source_locked = False
+            return
+        ok, err_msg = self.backend._check_video_integrity(str(p))
+        if not ok:
+            QMessageBox.warning(self.window(), "Video non valido", err_msg)
             self._video_source_locked = False
             return
         project_dir = None
@@ -777,6 +836,8 @@ class WorkspacePage(QWidget):
                 project_dir = str(Path(base) / "analysis" / str(self.project_id))
                 project_dir = str(Path(project_dir).resolve())
         self.load_analysis_result(project_dir=project_dir)
+        if project_dir:
+            self._offer_import_ai_events(project_dir)
 
     def _ensure_video_frame_rendered(self):
         """Forza il render del frame corrente quando il widget acquisisce dimensione."""
@@ -957,15 +1018,19 @@ class WorkspacePage(QWidget):
         layout.addWidget(self.list_hl_sequence, 2)
 
         seq_row = QHBoxLayout()
+        btn_add_clips = QPushButton("Aggiungi clip selezionate")
+        btn_add_clips.clicked.connect(self._add_selected_clips_to_sequence)
+        btn_add_video = QPushButton("+ Aggiungi video")
+        btn_add_video.setToolTip("Aggiungi un video esterno alla sequenza (es. intervista, intro, fuori campo)")
+        btn_add_video.clicked.connect(self._add_external_video_to_sequence)
         btn_add_img = QPushButton("+ Aggiungi immagine")
         btn_add_img.clicked.connect(self._add_highlight_image)
         btn_create_img = QPushButton("Crea Immagine")
         btn_create_img.clicked.connect(self._create_highlight_image)
-        btn_add_clips = QPushButton("Aggiungi clip selezionate")
-        btn_add_clips.clicked.connect(self._add_selected_clips_to_sequence)
         btn_remove_seq = QPushButton("Rimuovi selezionato")
         btn_remove_seq.clicked.connect(self._remove_from_sequence)
         seq_row.addWidget(btn_add_clips)
+        seq_row.addWidget(btn_add_video)
         seq_row.addWidget(btn_add_img)
         seq_row.addWidget(btn_create_img)
         seq_row.addWidget(btn_remove_seq)
@@ -1046,6 +1111,8 @@ class WorkspacePage(QWidget):
             start = int((clip or {}).get("start", 0))
             end = int((clip or {}).get("end", 0))
             txt = f"Clip: {label}   ({start//1000}s - {end//1000}s)"
+        elif seq_item.get("type") == "external_video":
+            txt = f"🎬 Video: {seq_item.get('name', Path(seq_item.get('path','')).name)}"
         else:
             path = seq_item.get("path", "")
             dur = seq_item.get("duration_sec", 3)
@@ -1102,6 +1169,23 @@ class WorkspacePage(QWidget):
         if not ok:
             return
         seq_item = {"type": "image", "path": path, "duration_sec": int(seconds)}
+        idx = self._ask_insert_position()
+        if idx >= 0:
+            self._hl_insert_item(seq_item, idx)
+
+    def _add_external_video_to_sequence(self):
+        """Aggiunge un video esterno (intervista, intro, ecc.) alla sequenza highlights."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleziona video esterno",
+            "",
+            "Video Files (*.mp4 *.mov *.avi *.mkv *.webm);;All Files (*.*)"
+        )
+        if not path:
+            return
+        import os
+        filename = os.path.basename(path)
+        seq_item = {"type": "external_video", "path": path, "name": filename}
         idx = self._ask_insert_position()
         if idx >= 0:
             self._hl_insert_item(seq_item, idx)
@@ -1230,21 +1314,47 @@ class WorkspacePage(QWidget):
 
     def show_field_calibration(self):
         """Apre il dialog di calibrazione campo (per analisi automatica)."""
-        if not getattr(self, "video_player", None):
+        from calibration_registry import CalibrationRegistry
+        from analysis.homography import clear_calibrator_cache
+        from analysis.config import get_calibration_path
+
+        video_path = str(getattr(self.backend.project, "video_path", "") or "").strip()
+        if not video_path:
             QMessageBox.warning(self, "Calibrazione", "Apri prima un video.")
             return
-        qimg = self.video_player.getCurrentFrameAsQImage()
-        if qimg is None or qimg.isNull():
-            QMessageBox.warning(self, "Calibrazione", "Impossibile acquisire il frame corrente.")
-            return
+
         project_dir = None
         if hasattr(self, "project_id") and self.project_id and hasattr(self, "project_repository"):
             base = getattr(self.project_repository, "base_path", None)
             if base:
                 project_dir = str(base / "analysis" / str(self.project_id))
-        dlg = FieldCalibrationDialog(qimg, project_dir=project_dir, parent=self.window())
-        from analysis.homography import clear_calibrator_cache
-        dlg.calibrationSaved.connect(clear_calibrator_cache)
+
+        base_path = str(Path(__file__).parent)
+        registry = CalibrationRegistry(base_path)
+        pos_ms = getattr(self.video_player, "_position_ms", 0)
+
+        dlg = FieldCalibrationDialog(video_path, pos_ms, registry, self)
+
+        def _persist_to_project(matrix):
+            """Scrive field_calibration.json nel project_dir per la pipeline di analisi."""
+            import json as _json
+            import numpy as _np
+            if not matrix or not project_dir:
+                return
+            cal_path = get_calibration_path(project_dir)
+            cal_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cal_path, "w", encoding="utf-8") as f:
+                _json.dump({
+                    "pixel_points": [],
+                    "field_points": [],
+                    "homography": _np.array(matrix).tolist(),
+                }, f, indent=2)
+            clear_calibrator_cache()
+
+        dlg.calibration_saved.connect(
+            lambda cal_id: _persist_to_project(
+                (registry.get(cal_id) or {}).get("matrix")))
+        dlg.calibration_applied.connect(_persist_to_project)
         dlg.exec_()
 
     def show_video_preprocessing(self):
@@ -1294,8 +1404,22 @@ class WorkspacePage(QWidget):
                 return
             if mb.clickedButton() == btn_riprendi:
                 resume = True
-        run_preprocess = (mode == "full" and getattr(self, "_run_preprocess_choice", False))
+        run_preprocess = (mode == "full")
         input_video = get_video_for_player_detection(project_dir, video_path)
+
+        # ── Game Segment Detection (solo analisi completa) ─────────────────
+        if mode == "full":
+            try:
+                from ui.game_segment_dialog import GameSegmentDialog
+                _seg_chosen = [input_video]   # default: video originale
+                seg_dlg = GameSegmentDialog(input_video, parent=self.window())
+                seg_dlg.video_ready.connect(lambda p: _seg_chosen.__setitem__(0, p))
+                seg_dlg.start_detection()
+                seg_dlg.exec_()
+                input_video = _seg_chosen[0]
+            except Exception as e:
+                logging.warning("Game segment dialog (locale) fallito: %s", e)
+
         if getattr(self, "video_player", None) and self.video_player.duration() > 0:
             self.video_player.pause()
         self._analysis_in_progress = True
@@ -1361,16 +1485,37 @@ class WorkspacePage(QWidget):
         if not project_dir:
             QMessageBox.warning(self, "Analisi automatica", "Progetto non valido.")
             return
-        from analysis.video_preprocessing import get_preprocessed_path
-        preprocessed_exists = get_preprocessed_path(project_dir).exists()
+
+        # Blocco: se analisi già completata con successo, non permettere di rifarla.
+        # Il video è fisso per progetto — l'unico modo per cambiare video è aprire un nuovo progetto.
+        finished_path = Path(project_dir) / "analysis_output" / "finished.json"
+        if finished_path.exists():
+            try:
+                with open(finished_path, "r", encoding="utf-8") as _f:
+                    _fin = json.load(_f)
+                if _fin.get("success", False):
+                    msg = QMessageBox(self.window())
+                    msg.setWindowTitle("Analisi già completata")
+                    msg.setIcon(QMessageBox.Information)
+                    msg.setText("✅ L'analisi per questo progetto è già stata completata con successo.")
+                    msg.setInformativeText(
+                        "I risultati sono disponibili in Statistiche, Heatmap ed Eventi AI.\n\n"
+                        "Per analizzare una partita diversa, crea un nuovo progetto."
+                    )
+                    msg.setStandardButtons(QMessageBox.Ok)
+                    msg.exec_()
+                    return
+            except Exception:
+                pass  # Se il file è corrotto, lascia procedere
+
         current_mode = self._get_analysis_mode()
 
         dlg = QDialog(self.window())
         dlg.setWindowTitle("Analisi automatica")
         layout = QVBoxLayout(dlg)
         layout.addWidget(QLabel(
-            "Esegue in sequenza: Preprocesso video (opzionale), Player detection, Player tracking,\n"
-            "Ball detection, Ball tracking, Clustering globale squadre."
+            "Esegue in sequenza: Preprocesso video (automatico se necessario), Player detection,\n"
+            "Player tracking, Ball detection, Ball tracking, Clustering globale squadre."
         ))
         tip = QLabel("Suggerimento: per risultati migliori calibra il campo (Analisi step-by-step) e usa video 720p+.")
         tip.setStyleSheet("color: #888; font-size: 11px;")
@@ -1393,10 +1538,6 @@ class WorkspacePage(QWidget):
         grp_layout.addWidget(cloud_msg)
         layout.addWidget(grp_mode)
 
-        chk = QCheckBox("Preprocessa video (720p) se non già presente")
-        chk.setChecked(not preprocessed_exists)
-        chk.setToolTip("Consigliato se il video è in risoluzione maggiore di 720p. (Solo per analisi locale.)")
-        layout.addWidget(chk)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(dlg.accept)
         bb.rejected.connect(dlg.reject)
@@ -1405,7 +1546,6 @@ class WorkspacePage(QWidget):
             return
 
         use_local = rb_local.isChecked()
-        self._run_preprocess_choice = chk.isChecked()
 
         # Controllo calibrazione campo: suggerisci solo se non già presente
         from analysis.config import get_calibration_path
@@ -1470,35 +1610,79 @@ class WorkspacePage(QWidget):
         if not video_path or not os.path.isfile(video_path):
             QMessageBox.warning(self.window(), "Analisi in cloud", "Apri prima un video valido.")
             return
-        # Preprocessing automatico: se necessario riduce risoluzione/fps, altrimenti copia diretta
         project_dir = self._get_project_analysis_dir()
+        # Preprocessing in thread separato per non bloccare l'UI
+        final_video_path = video_path
         if project_dir:
             try:
-                from analysis.video_preprocessing import get_preprocessed_path, ensure_preprocessed, needs_preprocessing
+                from analysis.video_preprocessing import get_preprocessed_path, ensure_preprocessed
                 pp = get_preprocessed_path(project_dir)
                 if not pp.exists():
-                    if needs_preprocessing(video_path):
-                        logging.info("Cloud analysis: preprocessing necessario, avvio riduzione risoluzione/fps...")
+                    # Dialog "Preparazione video" non bloccante
+                    from PyQt5.QtWidgets import QProgressDialog
+                    wait = QProgressDialog("Preparazione video in corso...", None, 0, 0, self.window())
+                    wait.setWindowTitle("Preparazione")
+                    wait.setWindowModality(Qt.WindowModal)
+                    wait.setMinimumDuration(0)
+                    wait.setValue(0)
+                    wait.show()
+
+                    class _PrepWorker(QThread):
+                        def __init__(self, src, dst):
+                            super().__init__()
+                            self.src, self.dst, self.error = src, dst, None
+                        def run(self):
+                            try:
+                                ensure_preprocessed(self.src, self.dst)
+                            except Exception as e:
+                                self.error = e
+
+                    self._prep_worker = _PrepWorker(video_path, str(pp))
+                    self._prep_worker.finished.connect(wait.close)
+                    self._prep_worker.start()
+                    wait.exec_()
+                    self._prep_worker.wait()
+                    worker = self._prep_worker
+                    if worker.error:
+                        logging.warning("Preprocessing fallito (%s), uso video originale", worker.error)
                     else:
-                        logging.info("Cloud analysis: video già ottimizzato, copia diretta senza ricodifica")
-                    ensure_preprocessed(video_path, str(pp))
-                video_path = str(pp)
-                logging.info("Cloud analysis: uso video %s", video_path)
+                        final_video_path = str(pp)
+                else:
+                    final_video_path = str(pp)
+                logging.info("Cloud analysis: uso video %s", final_video_path)
             except Exception as e:
                 logging.warning("Cloud analysis: preprocessing fallito (%s), uso video originale", e)
+        # ── Game Segment Detection ─────────────────────────────────────────────
+        try:
+            from ui.game_segment_dialog import GameSegmentDialog
+            seg_dlg = GameSegmentDialog(final_video_path, parent=self.window())
+            # video_ready viene emesso sia su "taglia" che su "usa completo" e anche su reject
+            seg_dlg.video_ready.connect(
+                lambda path: self._launch_cloud_dialog(path)
+            )
+            seg_dlg.start_detection()
+            seg_dlg.exec_()
+            return  # _launch_cloud_dialog verrà chiamato dal signal
+        except Exception as e:
+            logging.warning("Game segment dialog fallito (%s), procedo con video completo", e)
+            # fallthrough: lancia direttamente con final_video_path
+        self._launch_cloud_dialog(final_video_path)
+
+    def _launch_cloud_dialog(self, final_video_path: str):
+        """Apre CloudAnalysisDialog con il video selezionato (tagliato o completo)."""
         options = {
             "conf_thresh": 0.3,
-            "target_fps": 3.0,  # 3 fps → meno frame, più veloce, entro timeout RunPod
+            "target_fps": 3.0,
         }
-        dlg = CloudAnalysisDialog(video_path, options, parent=self.window())
+        dlg = CloudAnalysisDialog(final_video_path, options, parent=self.window())
         dlg.finished_ok.connect(self._on_cloud_result_ready)
         dlg.failed.connect(self._on_cloud_job_failed)
         dlg.error.connect(self._on_cloud_error)
         dlg.finished.connect(self._on_cloud_dialog_finished)
+        self._cloud_analysis_dlg = dlg  # mantieni riferimento per evitare garbage collection
         self._analysis_in_progress = True
         dlg.start()
-        dlg.exec_()
-        self._analysis_in_progress = False
+        dlg.show()  # non bloccante: l'utente può continuare ad usare l'app durante l'analisi cloud
 
     def _on_cloud_result_ready(self, payload: dict):
         """Risultato analisi cloud pronto: salva su disco + post-processing locale + carica in UI."""
@@ -1506,7 +1690,7 @@ class WorkspacePage(QWidget):
 
         project_dir = self._get_project_analysis_dir()
 
-        # 1. Salva player_tracks su disco
+        # 1. Salva player_tracks e ball_tracks su disco
         try:
             if project_dir:
                 from analysis.player_tracking import get_tracks_path
@@ -1516,6 +1700,14 @@ class WorkspacePage(QWidget):
                     with open(tracks_path, "w", encoding="utf-8") as f:
                         _json.dump(tracks_data, f)
                     logging.info("Cloud tracks salvati: %s", tracks_path)
+                # Salva ball_tracks se disponibili nel payload
+                ball_data = (payload.get("tracking") or {}).get("ball_tracks")
+                if ball_data:
+                    from analysis.ball_tracking import get_ball_tracks_path
+                    ball_path = get_ball_tracks_path(project_dir)
+                    with open(ball_path, "w", encoding="utf-8") as f:
+                        _json.dump(ball_data, f)
+                    logging.info("Cloud ball_tracks salvati: %s", ball_path)
         except Exception as e:
             logging.warning("Salvataggio cloud tracks fallito: %s", e)
 
@@ -1523,12 +1715,31 @@ class WorkspacePage(QWidget):
         if project_dir:
             self._run_cloud_postprocessing(project_dir, payload)
 
+        # 3. Scrivi finished.json con success=True
+        try:
+            if project_dir:
+                from analysis.config import get_analysis_output_path
+                import datetime
+                finished_path = Path(get_analysis_output_path(project_dir)) / "finished.json"
+                finished_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(finished_path, "w", encoding="utf-8") as f:
+                    _json.dump({
+                        "success": True,
+                        "source": "cloud",
+                        "timestamp": datetime.datetime.now().isoformat(),
+                    }, f)
+                logging.info("finished.json scritto: %s", finished_path)
+        except Exception as e:
+            logging.warning("Scrittura finished.json fallita: %s", e)
+
         self.load_analysis_result(result_payload=payload)
         QMessageBox.information(
             self.window(),
             "Analisi in cloud",
             "Analisi completata. I risultati sono stati caricati.",
         )
+        if project_dir:
+            self._offer_import_ai_events(project_dir)
 
     def _run_cloud_postprocessing(self, project_dir: str, payload: dict):
         """
@@ -1587,18 +1798,18 @@ class WorkspacePage(QWidget):
         except Exception as e:
             logging.warning("Event engine post-cloud fallito: %s", e)
 
-        # 2c. Metrics engine (richiede events_engine.json)
+        # 2c. Metrics engine (gira sempre se player_tracks disponibile, events opzionali)
         try:
             from analysis.metrics import run_metrics_from_project
-            from analysis.config import get_analysis_output_path
+            from analysis.player_tracking import get_tracks_path
 
-            events_path = get_analysis_output_path(project_dir) / "detections" / "events_engine.json"
-            if events_path.exists():
+            tracks_path = get_tracks_path(project_dir)
+            if tracks_path.exists():
                 fps = payload.get("summary", {}).get("fps") or 3.0
                 ok = run_metrics_from_project(project_dir, fps=fps)
-                logging.info("Metrics engine post-cloud: %s", "ok" if ok else "skipped")
+                logging.info("Metrics engine post-cloud: %s", "ok" if ok else "fallito")
             else:
-                logging.info("Metrics engine skipped: events_engine.json non disponibile")
+                logging.info("Metrics engine skipped: player_tracks non disponibile")
         except Exception as e:
             logging.warning("Metrics engine post-cloud fallito: %s", e)
 
@@ -1610,15 +1821,89 @@ class WorkspacePage(QWidget):
         )
 
     def _on_cloud_error(self, message: str):
-        QMessageBox.warning(
-            self.window(),
-            "Analisi in cloud",
-            f"Impossibile avviare l'analisi in cloud.\n\n{message}\n\n"
-            "Verifica che il server sia raggiungibile (es. FOOTBALL_ANALYZER_API_URL) e riprova.",
-        )
+        self._analysis_in_progress = False
+        if "annullata automaticamente" in message:
+            QMessageBox.warning(
+                self.window(),
+                "Analisi annullata — Nessuna GPU disponibile",
+                "⏹ L'analisi è stata annullata automaticamente dopo 10 minuti in coda.\n\n"
+                "RunPod non aveva GPU disponibili. Il job è stato cancellato: non ti verrà addebitato nulla.\n\n"
+                "Riprova tra qualche minuto.",
+            )
+        else:
+            QMessageBox.warning(
+                self.window(),
+                "Errore analisi in cloud",
+                f"Impossibile completare l'analisi in cloud.\n\n{message}\n\n"
+                "Verifica la connessione e riprova.",
+            )
 
     def _on_cloud_dialog_finished(self):
         self._analysis_in_progress = False
+
+    def _show_toast_on_main_view(self, msg: str, toast_type: str):
+        """Mostra un toast Qt sovrapposto al centro del video widget."""
+        # Trova il widget video (parent della view centrale o il video_player stesso)
+        # Usa il video_player (OpenCVVideoWidget) come parent del toast
+        pw = self.window() if hasattr(self, 'window') else self
+        video_widget = getattr(pw, 'video_player', None) or pw
+
+        # Rimuovi toast precedente
+        existing = getattr(self, '_qt_toast_label', None)
+        if existing:
+            try:
+                existing.hide()
+                existing.deleteLater()
+            except Exception:
+                pass
+
+        from PyQt5.QtWidgets import QLabel
+        from PyQt5.QtCore import Qt, QTimer
+        from PyQt5.QtGui import QFont
+
+        bg = "#7f1d1d" if toast_type == 'warn' else "#1e3a5f"
+        border = "#ef4444" if toast_type == 'warn' else "#3b82f6"
+        color = "#fca5a5" if toast_type == 'warn' else "#93c5fd"
+
+        toast = QLabel(msg, video_widget)
+        toast.setAlignment(Qt.AlignCenter)
+        toast.setWordWrap(True)
+        toast.setStyleSheet(f"""
+            QLabel {{
+                background-color: {bg};
+                border: 2px solid {border};
+                border-radius: 10px;
+                color: {color};
+                font-size: 15px;
+                font-weight: bold;
+                padding: 14px 24px;
+            }}
+        """)
+        toast.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        toast.adjustSize()
+        toast.setMaximumWidth(380)
+        toast.adjustSize()
+
+        # Centra sul widget video
+        vw = video_widget.width()
+        vh = video_widget.height()
+        tw, th = toast.width(), toast.height()
+        toast.move((vw - tw) // 2, (vh - th) // 2)
+        toast.raise_()
+        toast.show()
+        self._qt_toast_label = toast
+
+        QTimer.singleShot(5000, lambda: toast.hide() if toast else None)
+
+    def _offer_import_ai_events(self, project_dir: str):
+        """Dopo analisi completata: aggiorna silenziosamente la sezione 'Eventi Automatici AI' nel frontend."""
+        try:
+            # Notifica il JS di ricaricare gli eventi AI (loadAiEvents chiama backend.getAiEvents())
+            if hasattr(self, 'web_view') and self.web_view:
+                self.web_view.page().runJavaScript("if (typeof loadAiEvents === 'function') loadAiEvents();")
+        except Exception as e:
+            import logging
+            logging.warning("_offer_import_ai_events: %s", e)
 
     def _on_local_analysis_failed_offer_cloud(self, err_msg: str):
         """Dopo fallimento analisi locale (full): mostra errore e propone passaggio a Cloud."""
@@ -1973,6 +2258,569 @@ class WorkspacePage(QWidget):
         if self.video_player:
             self.video_player.stop()  # stop() chiama release() su capture
         event.accept()
+
+
+class TeamsPlayersPage(QWidget):
+    """Pagina Squadre e Giocatori nella Dashboard."""
+
+    def __init__(self, project_repository):
+        super().__init__()
+        from teams_repository import TeamsRepository
+        self.teams_repo = TeamsRepository()
+        self._selected_team_id = None
+        self._selected_country = ""
+        self._selected_league = ""
+        self._build_ui()
+        self._refresh_teams()
+
+    def _col_list_style(self):
+        return """
+            QListWidget { background: rgba(11,19,35,0.5); border: none;
+                border-right: 1px solid rgba(255,255,255,0.07); color: #c8d8ec; font-size: 12px; }
+            QListWidget::item { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+            QListWidget::item:selected { background: rgba(46,216,163,0.18); color: #eafff8; font-weight: 700; }
+            QListWidget::item:hover:!selected { background: rgba(255,255,255,0.05); }
+        """
+
+    def _col_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "font-size: 10px; font-weight: 700; color: #9eb0c8; "
+            "letter-spacing: 1.5px; padding: 6px 10px 4px 10px; "
+            "background: rgba(255,255,255,0.03); "
+            "border-bottom: 1px solid rgba(255,255,255,0.07);"
+        )
+        return lbl
+
+    def _build_ui(self):
+        from PyQt5.QtWidgets import QScrollArea, QSplitter, QListWidget, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit
+        main = QVBoxLayout(self)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+
+        # ── Header ──
+        header_widget = QWidget()
+        header_widget.setStyleSheet("background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.07);")
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(24, 14, 20, 14)
+        title = QLabel("Squadre e Giocatori")
+        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f1f6ff;")
+        header_layout.addWidget(title, 1)
+        btn_new_team = QPushButton("+ Nuova Squadra")
+        btn_new_team.setFixedHeight(32)
+        btn_new_team.setStyleSheet("""
+            QPushButton { background: #17806a; color: #eafff8; border: none;
+                border-radius: 6px; padding: 0 16px; font-weight: 700; font-size: 12px; }
+            QPushButton:hover { background: #1e947c; }
+        """)
+        btn_new_team.clicked.connect(self._on_add_team)
+        header_layout.addWidget(btn_new_team)
+        main.addWidget(header_widget)
+
+        # ── 4-column splitter ──
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(0)
+        splitter.setStyleSheet("QSplitter::handle { background: transparent; }")
+
+        _search_style = """
+            QLineEdit { background: rgba(255,255,255,0.06); border: none;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                color: #c8d8ec; font-size: 11px; padding: 5px 8px; }
+            QLineEdit::placeholder { color: #5a7090; }
+        """
+
+        # ── Colonna 1: Nazione ──
+        col_nazione = QWidget()
+        col_nazione.setMaximumWidth(160)
+        col_nazione.setMinimumWidth(110)
+        vn = QVBoxLayout(col_nazione)
+        vn.setContentsMargins(0, 0, 0, 0)
+        vn.setSpacing(0)
+        vn.addWidget(self._col_label("NAZIONE"))
+        self._search_nazione = QLineEdit()
+        self._search_nazione.setPlaceholderText("🔍 Cerca...")
+        self._search_nazione.setStyleSheet(_search_style)
+        self._search_nazione.textChanged.connect(self._filter_nazione)
+        vn.addWidget(self._search_nazione)
+        self._list_nazione = QListWidget()
+        self._list_nazione.setStyleSheet(self._col_list_style())
+        self._list_nazione.currentItemChanged.connect(self._on_nazione_changed)
+        vn.addWidget(self._list_nazione, 1)
+        splitter.addWidget(col_nazione)
+
+        # ── Colonna 2: Lega ──
+        col_lega = QWidget()
+        col_lega.setMaximumWidth(180)
+        col_lega.setMinimumWidth(120)
+        vl = QVBoxLayout(col_lega)
+        vl.setContentsMargins(0, 0, 0, 0)
+        vl.setSpacing(0)
+        vl.addWidget(self._col_label("LEGA"))
+        self._search_lega = QLineEdit()
+        self._search_lega.setPlaceholderText("🔍 Cerca...")
+        self._search_lega.setStyleSheet(_search_style)
+        self._search_lega.textChanged.connect(self._filter_lega)
+        vl.addWidget(self._search_lega)
+        self._list_lega = QListWidget()
+        self._list_lega.setStyleSheet(self._col_list_style())
+        self._list_lega.currentItemChanged.connect(self._on_lega_changed)
+        vl.addWidget(self._list_lega, 1)
+        splitter.addWidget(col_lega)
+
+        # ── Colonna 3: Squadra ──
+        col_squadra = QWidget()
+        col_squadra.setMaximumWidth(200)
+        col_squadra.setMinimumWidth(130)
+        vs = QVBoxLayout(col_squadra)
+        vs.setContentsMargins(0, 0, 0, 0)
+        vs.setSpacing(0)
+        vs.addWidget(self._col_label("SQUADRA"))
+        self._search_squadra = QLineEdit()
+        self._search_squadra.setPlaceholderText("🔍 Cerca...")
+        self._search_squadra.setStyleSheet(_search_style)
+        self._search_squadra.textChanged.connect(self._filter_squadra)
+        vs.addWidget(self._search_squadra)
+        self._list_squadra = QListWidget()
+        self._list_squadra.setStyleSheet(self._col_list_style())
+        self._list_squadra.currentItemChanged.connect(self._on_squadra_changed)
+        vs.addWidget(self._list_squadra, 1)
+        splitter.addWidget(col_squadra)
+
+        # ── Colonna 4: Rosa / Giocatori ──
+        players_panel = QWidget()
+        players_panel.setStyleSheet("background: rgba(11,19,35,0.3);")
+        players_v = QVBoxLayout(players_panel)
+        players_v.setContentsMargins(16, 10, 16, 12)
+        players_v.setSpacing(8)
+
+        players_header = QHBoxLayout()
+        self._lbl_team_name = QLabel("← Seleziona una squadra")
+        self._lbl_team_name.setStyleSheet("font-size: 15px; font-weight: 700; color: #e8f0fa;")
+        players_header.addWidget(self._lbl_team_name, 1)
+
+        btn_import_api = QPushButton("🌐 API-Football")
+        btn_import_api.setFixedHeight(28)
+        btn_import_api.setToolTip("Importa squadra e giocatori da API-Football")
+        btn_import_api.setStyleSheet("""
+            QPushButton { background: rgba(46,216,163,0.12); color: #2ed8a3;
+                border: 1px solid rgba(46,216,163,0.3);
+                border-radius: 6px; padding: 0 12px; font-size: 11px; font-weight: 600; }
+            QPushButton:hover { background: rgba(46,216,163,0.2); }
+        """)
+        btn_import_api.clicked.connect(self._on_import_api)
+        players_header.addWidget(btn_import_api)
+
+        btn_import = QPushButton("📥 CSV")
+        btn_import.setFixedHeight(28)
+        btn_import.setStyleSheet("""
+            QPushButton { background: rgba(255,255,255,0.08); color: #d0dff0;
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 6px; padding: 0 10px; font-size: 11px; }
+            QPushButton:hover { background: rgba(255,255,255,0.14); }
+        """)
+        btn_import.clicked.connect(self._on_import_csv)
+        players_header.addWidget(btn_import)
+
+        btn_add_player = QPushButton("+ Giocatore")
+        btn_add_player.setFixedHeight(28)
+        btn_add_player.setStyleSheet("""
+            QPushButton { background: #17806a; color: #eafff8; border: none;
+                border-radius: 6px; padding: 0 12px; font-weight: 700; font-size: 11px; }
+            QPushButton:hover { background: #1e947c; }
+        """)
+        btn_add_player.clicked.connect(self._on_add_player)
+        players_header.addWidget(btn_add_player)
+        players_v.addLayout(players_header)
+
+        self._players_table = QTableWidget()
+        self._players_table.setColumnCount(5)
+        self._players_table.setHorizontalHeaderLabels(["#", "Nome", "Ruolo", "Track ID", ""])
+        self._players_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self._players_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self._players_table.setColumnWidth(0, 44)
+        self._players_table.setColumnWidth(3, 80)
+        self._players_table.setColumnWidth(4, 60)
+        self._players_table.verticalHeader().setVisible(False)
+        self._players_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._players_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._players_table.setAlternatingRowColors(True)
+        self._players_table.setStyleSheet("""
+            QTableWidget { background: rgba(11,19,35,0.6); border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 8px; gridline-color: rgba(255,255,255,0.05); color: #d8e8f8; font-size: 12px; }
+            QTableWidget::item { padding: 4px 8px; }
+            QTableWidget::item:selected { background: rgba(46,216,163,0.18); }
+            QHeaderView::section { background: rgba(11,19,35,0.8); color: #9eb0c8; border: none;
+                padding: 6px 8px; font-size: 11px; font-weight: 600; }
+            QTableWidget::item:alternate { background: rgba(255,255,255,0.02); }
+        """)
+        self._players_table.cellDoubleClicked.connect(self._on_edit_player)
+        players_v.addWidget(self._players_table, 1)
+        splitter.addWidget(players_panel)
+
+        splitter.setSizes([140, 160, 180, 700])
+        main.addWidget(splitter, 1)
+
+    # ── Cascading column handlers ────────────────────────────────────────────
+
+    def _on_nazione_changed(self, current, _previous):
+        country = current.data(Qt.UserRole) if current else ""
+        self._selected_country = country
+        self._refresh_leghe(country)
+        self._refresh_squadre("", "")
+        self._selected_team_id = None
+        self._lbl_team_name.setText("← Seleziona una squadra")
+        self._players_table.setRowCount(0)
+
+    def _on_lega_changed(self, current, _previous):
+        league = current.data(Qt.UserRole) if current else ""
+        self._selected_league = league
+        country = getattr(self, "_selected_country", "")
+        self._refresh_squadre(country, league)
+        self._selected_team_id = None
+        self._lbl_team_name.setText("← Seleziona una squadra")
+        self._players_table.setRowCount(0)
+
+    def _on_squadra_changed(self, current, _previous):
+        team_id = current.data(Qt.UserRole) if current else None
+        if team_id:
+            self._select_team(team_id)
+
+    def _refresh_nazioni(self):
+        cur = self._list_nazione.currentItem()
+        cur_val = cur.data(Qt.UserRole) if cur else ""
+        self._list_nazione.blockSignals(True)
+        self._list_nazione.clear()
+        from PyQt5.QtWidgets import QListWidgetItem
+        all_item = QListWidgetItem("Tutte")
+        all_item.setData(Qt.UserRole, "")
+        self._list_nazione.addItem(all_item)
+        for c in self.teams_repo.list_countries():
+            item = QListWidgetItem(c)
+            item.setData(Qt.UserRole, c)
+            self._list_nazione.addItem(item)
+        # Ripristina selezione
+        for i in range(self._list_nazione.count()):
+            if self._list_nazione.item(i).data(Qt.UserRole) == cur_val:
+                self._list_nazione.setCurrentRow(i)
+                break
+        else:
+            self._list_nazione.setCurrentRow(0)
+        self._list_nazione.blockSignals(False)
+
+    def _refresh_leghe(self, country=""):
+        cur = self._list_lega.currentItem()
+        cur_val = cur.data(Qt.UserRole) if cur else ""
+        self._list_lega.blockSignals(True)
+        self._list_lega.clear()
+        from PyQt5.QtWidgets import QListWidgetItem
+        all_item = QListWidgetItem("Tutte")
+        all_item.setData(Qt.UserRole, "")
+        self._list_lega.addItem(all_item)
+        for lg in self.teams_repo.list_leagues(country):
+            item = QListWidgetItem(lg)
+            item.setData(Qt.UserRole, lg)
+            self._list_lega.addItem(item)
+        for i in range(self._list_lega.count()):
+            if self._list_lega.item(i).data(Qt.UserRole) == cur_val:
+                self._list_lega.setCurrentRow(i)
+                break
+        else:
+            self._list_lega.setCurrentRow(0)
+        self._list_lega.blockSignals(False)
+
+    def _refresh_squadre(self, country="", league=""):
+        self._list_squadra.blockSignals(True)
+        self._list_squadra.clear()
+        from PyQt5.QtWidgets import QListWidgetItem
+        teams = [
+            t for t in self.teams_repo.list_teams()
+            if (not country or t.country == country)
+            and (not league or t.league == league)
+        ]
+        for team in teams:
+            item = QListWidgetItem(f"  {team.name}")
+            item.setData(Qt.UserRole, team.id)
+            self._list_squadra.addItem(item)
+            if team.id == self._selected_team_id:
+                self._list_squadra.setCurrentItem(item)
+        self._list_squadra.blockSignals(False)
+
+    def _filter_nazione(self, text):
+        q = text.strip().lower()
+        for i in range(self._list_nazione.count()):
+            item = self._list_nazione.item(i)
+            item.setHidden(bool(q) and q not in item.text().lower())
+
+    def _filter_lega(self, text):
+        q = text.strip().lower()
+        for i in range(self._list_lega.count()):
+            item = self._list_lega.item(i)
+            item.setHidden(bool(q) and q not in item.text().lower())
+
+    def _filter_squadra(self, text):
+        q = text.strip().lower()
+        for i in range(self._list_squadra.count()):
+            item = self._list_squadra.item(i)
+            item.setHidden(bool(q) and q not in item.text().lower())
+
+    def _refresh_teams(self):
+        self._refresh_nazioni()
+        country = getattr(self, "_selected_country", "")
+        league = getattr(self, "_selected_league", "")
+        self._refresh_leghe(country)
+        self._refresh_squadre(country, league)
+        # Riapplica filtri di ricerca attivi
+        self._filter_nazione(self._search_nazione.text())
+        self._filter_lega(self._search_lega.text())
+        self._filter_squadra(self._search_squadra.text())
+
+    def _select_team(self, team_id: str):
+        self._selected_team_id = team_id
+        team = self.teams_repo.get_team(team_id)
+        if team:
+            self._lbl_team_name.setText(f"{team.name}  •  {len(team.players)} giocatori")
+        self._refresh_players()
+
+    def _refresh_players(self):
+        from PyQt5.QtWidgets import QTableWidgetItem
+        self._players_table.setRowCount(0)
+        if not self._selected_team_id:
+            return
+        team = self.teams_repo.get_team(self._selected_team_id)
+        if not team:
+            return
+        for p in team.players:
+            row = self._players_table.rowCount()
+            self._players_table.insertRow(row)
+            num_str = str(p.jersey_number) if p.jersey_number is not None else "—"
+            self._players_table.setItem(row, 0, QTableWidgetItem(num_str))
+            self._players_table.setItem(row, 1, QTableWidgetItem(p.name))
+            self._players_table.setItem(row, 2, QTableWidgetItem(p.role))
+            self._players_table.setItem(row, 3, QTableWidgetItem("—"))  # track_id (futuro)
+            del_btn = QPushButton("Elimina")
+            del_btn.setStyleSheet("""
+                QPushButton { background: rgba(220,50,50,0.15); color: #f87171; border: 1px solid rgba(220,50,50,0.3);
+                    border-radius: 4px; font-size: 10px; padding: 2px 6px; }
+                QPushButton:hover { background: rgba(220,50,50,0.3); }
+            """)
+            del_btn.clicked.connect(lambda _, tid=team.id, pid=p.id: self._on_delete_player(tid, pid))
+            self._players_table.setCellWidget(row, 4, del_btn)
+            # Salva player_id nella riga per double-click edit
+            self._players_table.item(row, 1).setData(Qt.UserRole, p.id)
+
+    def _on_add_team(self):
+        from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QLineEdit, QColorDialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Nuova Squadra")
+        dlg.setMinimumWidth(320)
+        form = QVBoxLayout(dlg)
+        form.setSpacing(10)
+        form.addWidget(QLabel("Nome squadra:"))
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("es. Roma")
+        form.addWidget(name_edit)
+        # Colore
+        color_row = QHBoxLayout()
+        color_row.addWidget(QLabel("Colore maglia:"))
+        chosen_color = ["#3b82f6"]
+        color_preview = QPushButton()
+        color_preview.setFixedSize(32, 24)
+        color_preview.setStyleSheet(f"background: {chosen_color[0]}; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3);")
+        def pick_color():
+            c = QColorDialog.getColor(QColor(chosen_color[0]), dlg)
+            if c.isValid():
+                chosen_color[0] = c.name()
+                color_preview.setStyleSheet(f"background: {chosen_color[0]}; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3);")
+        color_preview.clicked.connect(pick_color)
+        color_row.addWidget(color_preview)
+        color_row.addStretch(1)
+        form.addLayout(color_row)
+        # Logo
+        logo_row = QHBoxLayout()
+        logo_row.addWidget(QLabel("Stemma (opzionale):"))
+        chosen_logo = [None]
+        lbl_logo = QLabel("Nessun file")
+        lbl_logo.setStyleSheet("color: #9eb0c8; font-size: 11px;")
+        btn_logo = QPushButton("Scegli...")
+        btn_logo.setFixedHeight(26)
+        def pick_logo():
+            path, _ = QFileDialog.getOpenFileName(dlg, "Seleziona stemma", "", "Immagini (*.png *.jpg *.jpeg *.svg)")
+            if path:
+                chosen_logo[0] = path
+                lbl_logo.setText(Path(path).name)
+        btn_logo.clicked.connect(pick_logo)
+        logo_row.addWidget(btn_logo)
+        logo_row.addWidget(lbl_logo, 1)
+        form.addLayout(logo_row)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addWidget(btns)
+        if dlg.exec_() == QDialog.Accepted and name_edit.text().strip():
+            self.teams_repo.add_team(name_edit.text().strip(), chosen_color[0], chosen_logo[0])
+            self._refresh_teams()
+
+    def _team_context_menu(self, team_id: str, widget):
+        from PyQt5.QtWidgets import QMenu
+        menu = QMenu(self)
+        act_edit = menu.addAction("✏️ Rinomina / Modifica")
+        act_logo = menu.addAction("🖼 Cambia stemma")
+        menu.addSeparator()
+        act_del = menu.addAction("🗑 Elimina squadra")
+        act = menu.exec_(widget.mapToGlobal(widget.rect().bottomLeft()))
+        if act == act_del:
+            self.teams_repo.delete_team(team_id)
+            if self._selected_team_id == team_id:
+                self._selected_team_id = None
+                self._players_table.setRowCount(0)
+                self._lbl_team_name.setText("Seleziona una squadra")
+            self._refresh_teams()
+        elif act == act_edit:
+            self._on_edit_team(team_id)
+        elif act == act_logo:
+            path, _ = QFileDialog.getOpenFileName(self, "Seleziona stemma", "", "Immagini (*.png *.jpg *.jpeg *.svg)")
+            if path:
+                self.teams_repo.update_team(team_id, logo_path=path)
+                self._refresh_teams()
+
+    def _on_edit_team(self, team_id: str):
+        from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QLineEdit, QColorDialog
+        team = self.teams_repo.get_team(team_id)
+        if not team:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Modifica Squadra")
+        dlg.setMinimumWidth(300)
+        form = QVBoxLayout(dlg)
+        form.addWidget(QLabel("Nome:"))
+        name_edit = QLineEdit(team.name)
+        form.addWidget(name_edit)
+        chosen_color = [team.color or "#3b82f6"]
+        color_row = QHBoxLayout()
+        color_row.addWidget(QLabel("Colore:"))
+        color_preview = QPushButton()
+        color_preview.setFixedSize(32, 24)
+        color_preview.setStyleSheet(f"background: {chosen_color[0]}; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3);")
+        def pick_color():
+            c = QColorDialog.getColor(QColor(chosen_color[0]), dlg)
+            if c.isValid():
+                chosen_color[0] = c.name()
+                color_preview.setStyleSheet(f"background: {chosen_color[0]}; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3);")
+        color_preview.clicked.connect(pick_color)
+        color_row.addWidget(color_preview)
+        color_row.addStretch(1)
+        form.addLayout(color_row)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addWidget(btns)
+        if dlg.exec_() == QDialog.Accepted:
+            self.teams_repo.update_team(team_id, name=name_edit.text().strip(), color=chosen_color[0])
+            self._refresh_teams()
+            if self._selected_team_id == team_id:
+                self._select_team(team_id)
+
+    def _on_add_player(self):
+        if not self._selected_team_id:
+            QMessageBox.information(self, "Aggiungi giocatore", "Seleziona prima una squadra.")
+            return
+        self._show_player_dialog()
+
+    def _on_edit_player(self, row, col):
+        item = self._players_table.item(row, 1)
+        if not item:
+            return
+        player_id = item.data(Qt.UserRole)
+        self._show_player_dialog(player_id=player_id)
+
+    def _show_player_dialog(self, player_id: str = None):
+        from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QLineEdit, QComboBox, QSpinBox
+        from teams_repository import ROLES
+        team = self.teams_repo.get_team(self._selected_team_id)
+        if not team:
+            return
+        existing = next((p for p in team.players if p.id == player_id), None) if player_id else None
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Modifica Giocatore" if existing else "Nuovo Giocatore")
+        dlg.setMinimumWidth(300)
+        form = QVBoxLayout(dlg)
+        form.setSpacing(8)
+
+        form.addWidget(QLabel("Nome:"))
+        name_edit = QLineEdit(existing.name if existing else "")
+        name_edit.setPlaceholderText("es. De Rossi")
+        form.addWidget(name_edit)
+
+        form.addWidget(QLabel("Numero maglia:"))
+        num_spin = QSpinBox()
+        num_spin.setRange(0, 99)
+        num_spin.setSpecialValueText("—")
+        if existing and existing.jersey_number is not None:
+            num_spin.setValue(existing.jersey_number)
+        form.addWidget(num_spin)
+
+        form.addWidget(QLabel("Ruolo:"))
+        role_combo = QComboBox()
+        role_combo.addItems(ROLES)
+        if existing:
+            idx = ROLES.index(existing.role) if existing.role in ROLES else 0
+            role_combo.setCurrentIndex(idx)
+        form.addWidget(role_combo)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addWidget(btns)
+
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        name = name_edit.text().strip()
+        if not name:
+            return
+        jersey = num_spin.value() if num_spin.value() > 0 else None
+        role = role_combo.currentText()
+
+        if existing:
+            self.teams_repo.update_player(self._selected_team_id, player_id, name=name,
+                                          jersey_number=jersey, role=role)
+        else:
+            self.teams_repo.add_player(self._selected_team_id, name, jersey, role)
+        self._refresh_players()
+        team = self.teams_repo.get_team(self._selected_team_id)
+        if team:
+            self._lbl_team_name.setText(f"{team.name}  ({len(team.players)} giocatori)")
+
+    def _on_delete_player(self, team_id: str, player_id: str):
+        self.teams_repo.delete_player(team_id, player_id)
+        self._refresh_players()
+
+    def _on_import_csv(self):
+        if not self._selected_team_id:
+            QMessageBox.information(self, "Importa CSV", "Seleziona prima una squadra.")
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Importa giocatori da CSV", "", "CSV (*.csv)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                csv_text = f.read()
+        except Exception as e:
+            QMessageBox.warning(self, "Errore", f"Impossibile leggere il file:\n{e}")
+            return
+        n = self.teams_repo.import_from_csv(self._selected_team_id, csv_text)
+        self._refresh_players()
+        team = self.teams_repo.get_team(self._selected_team_id)
+        if team:
+            self._lbl_team_name.setText(f"{team.name}  ({len(team.players)} giocatori)")
+        QMessageBox.information(self, "Importa CSV", f"Importati {n} giocatori.\n\nFormato atteso:\nname,jersey_number,role")
+
+    def _on_import_api(self):
+        from ui.api_football_import_dialog import ApiFootballImportDialog
+        dlg = ApiFootballImportDialog(self.teams_repo, parent=self)
+        if dlg.exec_() == ApiFootballImportDialog.Accepted:
+            self.teams_repo = __import__('teams_repository').TeamsRepository()
+            self._refresh_teams()
 
 
 class DashboardPage(QWidget):
@@ -2365,19 +3213,16 @@ class DashboardPage(QWidget):
         content_stacked.addWidget(projects_page)
 
         # Pagina Squadre e Giocatori
-        teams_page = QWidget()
-        teams_layout = QVBoxLayout(teams_page)
-        teams_layout.setContentsMargins(34, 30, 34, 22)
-        teams_layout.setSpacing(16)
-        teams_title = QLabel("Squadre e Giocatori")
-        teams_title.setObjectName("dashboardTitle")
-        teams_layout.addWidget(teams_title)
-        teams_sub = QLabel("Gestisci squadre e giocatori. Potrai collegare i track ID (da Player tracking) ai giocatori per statistiche personalizzate.")
-        teams_sub.setObjectName("dashboardSubtitle")
-        teams_sub.setWordWrap(True)
-        teams_layout.addWidget(teams_sub)
-        teams_layout.addStretch(1)
+        teams_page = TeamsPlayersPage(self.project_repository)
         content_stacked.addWidget(teams_page)
+
+        # Pagina Impostazioni (index 2)
+        settings_page = self._build_settings_page()
+        content_stacked.addWidget(settings_page)
+
+        # Pagina Licenza (index 3)
+        license_page = self._build_license_page()
+        content_stacked.addWidget(license_page)
 
         content = content_stacked
 
@@ -2388,10 +3233,155 @@ class DashboardPage(QWidget):
 
         self._dashboard_nav_buttons = [nav_projects, nav_teams_players, nav_settings, nav_license]
         self._content_stacked = content_stacked
-        self._nav_to_index = {nav_projects: 0, nav_teams_players: 1}
+        self._nav_to_index = {nav_projects: 0, nav_teams_players: 1, nav_settings: 2, nav_license: 3}
         for btn in self._dashboard_nav_buttons:
             btn.clicked.connect(lambda _=False, b=btn: self._set_active_nav_button(b))
         QTimer.singleShot(0, lambda: self._set_active_nav_button(nav_projects))
+
+    def _build_settings_page(self) -> QWidget:
+        from PyQt5.QtWidgets import QComboBox, QFormLayout, QGroupBox
+        _card_style = """
+            QGroupBox { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px; margin-top: 12px; padding: 16px; color: #f1f6ff;
+                font-size: 13px; font-weight: 700; }
+            QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 6px; color: #6ee7b7; }
+            QLabel { color: #9eb0c8; font-size: 12px; }
+            QLabel[role="value"] { color: #e8f4ff; font-size: 13px; font-weight: 600; }
+            QComboBox { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 6px; color: #e8f4ff; padding: 5px 10px; font-size: 12px; min-width: 160px; }
+            QComboBox::drop-down { border: none; }
+            QComboBox QAbstractItemView { background: #1a2a42; color: #e8f4ff; selection-background-color: #17806a; }
+        """
+        page = QWidget()
+        page.setStyleSheet(_card_style)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(32, 28, 32, 28)
+        outer.setSpacing(20)
+
+        title = QLabel("Impostazioni")
+        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f1f6ff;")
+        outer.addWidget(title)
+
+        # ── Gruppo: Informazioni software ──
+        grp_info = QGroupBox("Informazioni Software")
+        form_info = QFormLayout(grp_info)
+        form_info.setSpacing(12)
+        form_info.setContentsMargins(12, 20, 12, 12)
+
+        def _val(text):
+            lbl = QLabel(text)
+            lbl.setProperty("role", "value")
+            lbl.style().unpolish(lbl); lbl.style().polish(lbl)
+            return lbl
+
+        form_info.addRow(QLabel("Versione:"), _val(APP_VERSION))
+        form_info.addRow(QLabel("Applicazione:"), _val("PRELYT — Football Analyzer"))
+        form_info.addRow(QLabel("Build:"), _val("Desktop (PyQt5)"))
+        outer.addWidget(grp_info)
+
+        # ── Gruppo: Preferenze ──
+        grp_pref = QGroupBox("Preferenze")
+        form_pref = QFormLayout(grp_pref)
+        form_pref.setSpacing(12)
+        form_pref.setContentsMargins(12, 20, 12, 12)
+
+        combo_lang = QComboBox()
+        combo_lang.addItems(["🇮🇹  Italiano", "🇬🇧  English", "🇪🇸  Español"])
+        combo_lang.setToolTip("Multilingua disponibile in una versione futura")
+        combo_lang.setEnabled(False)
+        lbl_lang_note = QLabel("  (disponibile prossimamente)")
+        lbl_lang_note.setStyleSheet("color: #5a7090; font-size: 11px;")
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(combo_lang)
+        lang_row.addWidget(lbl_lang_note)
+        lang_row.addStretch()
+        form_pref.addRow(QLabel("Lingua:"), lang_row)
+        outer.addWidget(grp_pref)
+
+        # ── Gruppo: Account ──
+        grp_acc = QGroupBox("Account")
+        form_acc = QFormLayout(grp_acc)
+        form_acc.setSpacing(12)
+        form_acc.setContentsMargins(12, 20, 12, 12)
+        form_acc.addRow(QLabel("Utente:"), _val("— (login non attivo)"))
+        form_acc.addRow(QLabel("Modalità:"), _val("Demo / Sviluppo"))
+        outer.addWidget(grp_acc)
+
+        outer.addStretch()
+        return page
+
+    def _build_license_page(self) -> QWidget:
+        _card_style = """
+            QGroupBox { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px; margin-top: 12px; padding: 16px; color: #f1f6ff;
+                font-size: 13px; font-weight: 700; }
+            QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 6px; color: #6ee7b7; }
+            QLabel { color: #9eb0c8; font-size: 12px; }
+            QLabel[role="value"] { color: #e8f4ff; font-size: 13px; font-weight: 600; }
+            QLabel[role="badge"] { background: rgba(22,120,100,0.25); border: 1px solid #17806a;
+                border-radius: 6px; color: #6ee7b7; font-size: 12px; font-weight: 700; padding: 3px 10px; }
+        """
+        from PyQt5.QtWidgets import QFormLayout, QGroupBox
+        page = QWidget()
+        page.setStyleSheet(_card_style)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(32, 28, 32, 28)
+        outer.setSpacing(20)
+
+        title = QLabel("Licenza")
+        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f1f6ff;")
+        outer.addWidget(title)
+
+        def _val(text):
+            lbl = QLabel(text)
+            lbl.setProperty("role", "value")
+            lbl.style().unpolish(lbl); lbl.style().polish(lbl)
+            return lbl
+
+        def _badge(text):
+            lbl = QLabel(text)
+            lbl.setProperty("role", "badge")
+            lbl.style().unpolish(lbl); lbl.style().polish(lbl)
+            lbl.setFixedHeight(26)
+            return lbl
+
+        # ── Stato licenza ──
+        grp_lic = QGroupBox("Stato Licenza")
+        form_lic = QFormLayout(grp_lic)
+        form_lic.setSpacing(12)
+        form_lic.setContentsMargins(12, 20, 12, 12)
+        form_lic.addRow(QLabel("Piano:"), _badge("✦ SVILUPPO"))
+        form_lic.addRow(QLabel("Valida fino a:"), _val("— (nessuna scadenza in modalità sviluppo)"))
+        form_lic.addRow(QLabel("Dispositivo:"), _val("Questo PC"))
+        form_lic.addRow(QLabel("Analisi cloud:"), _val("Attive (RunPod Serverless)"))
+        outer.addWidget(grp_lic)
+
+        # ── Funzionalità incluse ──
+        grp_feat = QGroupBox("Funzionalità Incluse")
+        feat_layout = QVBoxLayout(grp_feat)
+        feat_layout.setContentsMargins(12, 20, 12, 12)
+        feat_layout.setSpacing(6)
+        features = [
+            "✅  Analisi video automatica (YOLOX)",
+            "✅  Tracking giocatori e palla",
+            "✅  Lavagna tattica 2D",
+            "✅  Heatmap e pressing map",
+            "✅  Timeline eventi e clip",
+            "✅  Statistiche partita",
+            "✅  Database squadre e giocatori",
+            "✅  Analisi cloud (RunPod)",
+            "⏳  Fuorigioco automatico  (prossimamente)",
+            "⏳  AI Tactical Text Generator  (prossimamente)",
+            "⏳  Prelyt Mobile  (prossimamente)",
+        ]
+        for f in features:
+            lbl = QLabel(f)
+            lbl.setStyleSheet("color: #9eb0c8; font-size: 12px; padding: 2px 0;")
+            feat_layout.addWidget(lbl)
+        outer.addWidget(grp_feat)
+
+        outer.addStretch()
+        return page
 
     def _set_active_nav_button(self, active_button: QPushButton):
         for btn in getattr(self, "_dashboard_nav_buttons", []):
@@ -2429,6 +3419,56 @@ class DashboardPage(QWidget):
         if self.project_repository.rename(project_id, new_name):
             self.refresh_projects()
 
+    def _get_project_quick_stats(self, project_id: str) -> dict:
+        """Legge stats rapide per la card: stato analisi, N eventi, N giocatori."""
+        import json as _json
+        try:
+            from analysis.config import get_analysis_output_path
+            from analysis.player_tracking import get_tracks_path
+            base = getattr(self.project_repository, 'base_path', None)
+            if not base:
+                return {}
+            project_dir = str(Path(base) / 'analysis' / str(project_id))
+            stats = {}
+            # Stato analisi
+            tracks_path = get_tracks_path(project_dir)
+            if tracks_path.exists():
+                stats['analysed'] = True
+                with open(tracks_path, 'r', encoding='utf-8') as f:
+                    tracks = _json.load(f)
+                track_ids = set()
+                for frame in tracks.get('frames', []):
+                    for det in frame.get('detections', []):
+                        if det.get('class_name') in ('player', 'Goalie', 'NED', 'USA'):
+                            tid = det.get('track_id')
+                            if tid is not None:
+                                track_ids.add(tid)
+                stats['n_players'] = len(track_ids)
+            else:
+                stats['analysed'] = False
+                stats['n_players'] = 0
+            # Numero eventi taggati
+            events_path = Path(base) / 'analysis' / str(project_id) / 'events.json'
+            if events_path.exists():
+                with open(events_path, 'r', encoding='utf-8') as f:
+                    evts = _json.load(f)
+                stats['n_events'] = len(evts.get('events', evts if isinstance(evts, list) else []))
+            else:
+                stats['n_events'] = 0
+            # Possesso da metrics
+            metrics_path = Path(get_analysis_output_path(project_dir)) / 'metrics.json'
+            if metrics_path.exists():
+                with open(metrics_path, 'r', encoding='utf-8') as f:
+                    metrics = _json.load(f)
+                poss = metrics.get('possession', {})
+                t0 = poss.get('team_0_pct') or poss.get('team0_pct')
+                t1 = poss.get('team_1_pct') or poss.get('team1_pct')
+                if t0 is not None and t1 is not None:
+                    stats['possession'] = (round(t0), round(t1))
+        except Exception:
+            stats = {}
+        return stats
+
     def refresh_projects(self):
         try:
             grid = self.projects_grid
@@ -2456,8 +3496,8 @@ class DashboardPage(QWidget):
             card = QWidget()
             card.setObjectName("projectCard")
             card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-            card.setMinimumHeight(154)
-            card.setMaximumHeight(154)
+            card.setMinimumHeight(170)
+            card.setMaximumHeight(170)
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(14, 12, 14, 12)
             card_layout.setSpacing(10)
@@ -2466,6 +3506,12 @@ class DashboardPage(QWidget):
                 lambda pos, pid=meta.id, w=card: self._open_project_context_menu(pid, w.mapToGlobal(pos))
             )
 
+            qs = self._get_project_quick_stats(meta.id)
+
+            # Header: nome + badge analisi
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(8)
             name = QLabel(meta.name)
             name.setProperty("class", "projectName")
             name.setStyleSheet("font-size: 14px; font-weight: 700; color: #e9f1ff;")
@@ -2473,13 +3519,40 @@ class DashboardPage(QWidget):
             name.customContextMenuRequested.connect(
                 lambda pos, pid=meta.id, w=name: self._open_project_context_menu(pid, w.mapToGlobal(pos))
             )
+            header_row.addWidget(name, 1)
+            if qs.get('analysed'):
+                badge = QLabel("✅ Analizzato")
+                badge.setStyleSheet("font-size: 10px; color: #2ed8a3; background: rgba(46,216,163,0.12); border: 1px solid rgba(46,216,163,0.3); border-radius: 4px; padding: 1px 6px;")
+            else:
+                badge = QLabel("⏳ Non analizzato")
+                badge.setStyleSheet("font-size: 10px; color: #9eb0c8; background: rgba(158,176,200,0.08); border: 1px solid rgba(158,176,200,0.2); border-radius: 4px; padding: 1px 6px;")
+            header_row.addWidget(badge, 0, Qt.AlignVCenter)
+
             updated = QLabel(f"Ultima modifica {meta.updatedAt.replace('T', ' ').replace('Z', '')}")
             updated.setProperty("class", "projectUpdated")
-            updated.setStyleSheet("font-size: 12px; color: #9eb0c8;")
+            updated.setStyleSheet("font-size: 11px; color: #9eb0c8;")
             updated.setContextMenuPolicy(Qt.CustomContextMenu)
             updated.customContextMenuRequested.connect(
                 lambda pos, pid=meta.id, w=updated: self._open_project_context_menu(pid, w.mapToGlobal(pos))
             )
+
+            # Mini stats row
+            stats_row = QHBoxLayout()
+            stats_row.setContentsMargins(0, 0, 0, 0)
+            stats_row.setSpacing(12)
+            if qs.get('analysed'):
+                lbl_players = QLabel(f"👥 {qs.get('n_players', 0)} giocatori")
+                lbl_players.setStyleSheet("font-size: 11px; color: #7a9cc0;")
+                stats_row.addWidget(lbl_players)
+                lbl_events = QLabel(f"📌 {qs.get('n_events', 0)} eventi")
+                lbl_events.setStyleSheet("font-size: 11px; color: #7a9cc0;")
+                stats_row.addWidget(lbl_events)
+                poss = qs.get('possession')
+                if poss:
+                    lbl_poss = QLabel(f"⚽ {poss[0]}% — {poss[1]}%")
+                    lbl_poss.setStyleSheet("font-size: 11px; color: #7a9cc0;")
+                    stats_row.addWidget(lbl_poss)
+            stats_row.addStretch(1)
 
             actions = QHBoxLayout()
             actions.setContentsMargins(0, 0, 0, 0)
@@ -2523,8 +3596,9 @@ class DashboardPage(QWidget):
             actions.addWidget(open_btn, 0)
             actions.addWidget(del_btn, 0)
 
-            card_layout.addWidget(name)
+            card_layout.addLayout(header_row)
             card_layout.addWidget(updated)
+            card_layout.addLayout(stats_row)
             card_layout.addLayout(actions)
 
             row = idx // 2
