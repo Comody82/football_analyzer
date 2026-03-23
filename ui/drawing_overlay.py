@@ -1,6 +1,6 @@
 """Overlay per disegnare sul video: cerchi, frecce, testo, zoom - stile Kinovea."""
 from PyQt5.QtWidgets import (
-    QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
+    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsTextItem, QGraphicsRectItem,
     QGraphicsPolygonItem, QGraphicsPathItem, QApplication,
     QInputDialog, QColorDialog, QFontDialog, QMenu, QShortcut,
@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QGraphicsOpacityEffect, QCheckBox, QComboBox,
 )
 from PyQt5.QtGui import (
-    QPen, QBrush, QColor, QPainter, QPolygonF, QFont,
+    QPen, QBrush, QColor, QPainter, QPolygonF, QFont, QPixmap,
     QLinearGradient, QPainterPath, QPainterPathStroker, QWheelEvent,
     QKeySequence, QTransform, QRegion, QPolygon,
     QTextDocument, QTextOption, QTextBlockFormat, QTextCharFormat, QTextCursor,
@@ -22,6 +22,8 @@ from typing import Optional, List, Tuple, Dict, Any
 from enum import Enum
 import math
 
+from .highlight_image_creator import AddTextDialog
+
 
 class DrawTool(Enum):
     NONE = "none"
@@ -31,7 +33,8 @@ class DrawTool(Enum):
     RECTANGLE = "rectangle"
     TEXT = "text"
     CONE = "cone"  # cono di luce
-    ZOOM = "zoom"  # area zoom (rettangolo tratteggiato)
+    ZOOM = "zoom"  # area zoom (rotella)
+    ZOOM_ZONE = "zoom_zone"  # rettangolo zoom (solo quella zona ingrandita)
     PENCIL = "pencil"  # disegno a mano libera
     CURVED_LINE = "curved_line"  # linea curva con punto di controllo
     CURVED_ARROW = "curved_arrow"  # freccia curva
@@ -141,17 +144,34 @@ def _arrow_head_polygon(tip: QPointF, angle: float, length: float,
 
 
 def _make_bevel_gradient(p_light: QPointF, p_dark: QPointF, base_color: QColor) -> QLinearGradient:
-    """Gradiente con 4+ color stop per effetto bevel/estrusione 3D."""
+    """Gradiente con 4+ color stop per effetto bevel/estrusione 3D pronunciato."""
     grad = QLinearGradient(p_light, p_dark)
-    light = QColor(min(255, base_color.red() + 80), min(255, base_color.green() + 80), min(255, base_color.blue() + 80))
-    light_mid = QColor(min(255, base_color.red() + 35), min(255, base_color.green() + 35), min(255, base_color.blue() + 35))
-    dark_mid = QColor(max(0, base_color.red() - 35), max(0, base_color.green() - 35), max(0, base_color.blue() - 35))
-    dark = QColor(max(0, base_color.red() - 80), max(0, base_color.green() - 80), max(0, base_color.blue() - 80))
-    grad.setColorAt(0.0, light)      # bordo superiore
-    grad.setColorAt(0.25, light_mid) # transizione
-    grad.setColorAt(0.5, base_color)  # centro
-    grad.setColorAt(0.75, dark_mid)  # transizione
-    grad.setColorAt(1.0, dark)        # bordo inferiore
+    light = QColor(min(255, base_color.red() + 95), min(255, base_color.green() + 95), min(255, base_color.blue() + 95))
+    light_mid = QColor(min(255, base_color.red() + 40), min(255, base_color.green() + 40), min(255, base_color.blue() + 40))
+    dark_mid = QColor(max(0, base_color.red() - 45), max(0, base_color.green() - 45), max(0, base_color.blue() - 45))
+    dark = QColor(max(0, base_color.red() - 95), max(0, base_color.green() - 95), max(0, base_color.blue() - 95))
+    grad.setColorAt(0.0, light)
+    grad.setColorAt(0.22, light_mid)
+    grad.setColorAt(0.5, base_color)
+    grad.setColorAt(0.78, dark_mid)
+    grad.setColorAt(1.0, dark)
+    return grad
+
+
+def _make_bevel_gradient_3d(p_light: QPointF, p_dark: QPointF, base_color: QColor) -> QLinearGradient:
+    """Gradiente 3D realistico: top luminoso (luce da alto), lato destro visibilmente più scuro."""
+    grad = QLinearGradient(p_light, p_dark)
+    top_bright = QColor(min(255, base_color.red() + 120), min(255, base_color.green() + 120), min(255, base_color.blue() + 115))
+    top_mid = QColor(min(255, base_color.red() + 65), min(255, base_color.green() + 65), min(255, base_color.blue() + 60))
+    center = QColor(min(255, base_color.red() + 25), min(255, base_color.green() + 25), min(255, base_color.blue() + 20))
+    edge_dark = QColor(max(0, base_color.red() - 50), max(0, base_color.green() - 50), max(0, base_color.blue() - 45))
+    side_dark = QColor(max(0, base_color.red() - 115), max(0, base_color.green() - 115), max(0, base_color.blue() - 100))
+    grad.setColorAt(0.0, top_bright)   # Top: pienamente illuminato
+    grad.setColorAt(0.18, top_mid)     # Transizione morbida
+    grad.setColorAt(0.38, center)      # Centro faccia superiore
+    grad.setColorAt(0.58, base_color)  # Bordo top-lato
+    grad.setColorAt(0.78, edge_dark)   # Transizione al lato
+    grad.setColorAt(1.0, side_dark)    # Lato in ombra (visibilmente più scuro)
     return grad
 
 
@@ -267,10 +287,17 @@ class DrawableRectangle(QGraphicsRectItem):
 
 
 class DrawableArrow(QGraphicsPathItem):
-    """Frecce volumetriche 3D: corpo poligonale + punta triangolare piena, effetto bevel, ombra solo su corpo."""
-    HEAD_WIDTH_FACTOR = 2.5
-    SHADOW_OFFSET_PX = 3
-    HIGHLIGHT_OPACITY = 0.2
+    """Frecce 3D realistiche: punta corta e larga, spessore ridotto, connessione fluida."""
+    HEAD_WIDTH_FACTOR = 2.05
+    HEAD_LENGTH_FACTOR = 2.0
+    SHADOW_OFFSET_PX = 6
+    SHADOW_OPACITY = 38
+    SHADOW_SOFT_PX = 3
+    SHADOW_SOFT_OPACITY = 18
+    DEPTH_OFFSET = 0.26
+    THICKNESS_SCALE = 0.82
+    HIGHLIGHT_OPACITY_CENTER = 0.48
+    HIGHLIGHT_WIDTH_FACTOR = 0.42
 
     def __init__(self, x1: float, y1: float, x2: float, y2: float,
                  color: QColor = Qt.red, width: int = 4,
@@ -282,11 +309,12 @@ class DrawableArrow(QGraphicsPathItem):
         self._color = color
         self._width = max(2, width)
         self._style = style
-        self._arrow_size = max(12, self._width * 3)
+        self._arrow_size = max(10, int(self._width * self.HEAD_LENGTH_FACTOR))
         self._head_at_start = head_at_start
         self._update_path()
 
     def _update_path(self):
+        eff_w = self._width * self.THICKNESS_SCALE
         trim_end = float(self._arrow_size)
         trim_start = float(self._arrow_size) if self._head_at_start else 0
         body_path = _build_arrow_line_path(
@@ -294,10 +322,10 @@ class DrawableArrow(QGraphicsPathItem):
         )
         self._centerline_path = _build_arrow_line_path(self._style, self._p1, self._p2)
         self._highlight_centerline_path = body_path  # accorciato, senza punte
-        self._body_path_for_shadow = _make_body_only_shape(body_path, float(self._width))
+        self._body_path_for_shadow = _make_body_only_shape(body_path, float(eff_w))
         vol_path = _make_volumetric_arrow_shape(
             body_path, self._p1, self._p2,
-            float(self._width), float(self._arrow_size),
+            float(eff_w), float(self._arrow_size),
             self.HEAD_WIDTH_FACTOR, self._head_at_start
         )
         self.setPath(vol_path)
@@ -329,39 +357,97 @@ class DrawableArrow(QGraphicsPathItem):
         cx = (self._p1.x() + self._p2.x()) / 2
         cy = (self._p1.y() + self._p2.y()) / 2
         half_len = math.sqrt((self._p2.x() - self._p1.x()) ** 2 + (self._p2.y() - self._p1.y()) ** 2) / 2 or 1
-        head_polys = [
-            _arrow_head_polygon(self._p2, angle, self._arrow_size, self._width * self.HEAD_WIDTH_FACTOR)
-        ]
-        if self._head_at_start:
-            head_polys.append(
-                _arrow_head_polygon(self._p1, angle + math.pi, self._arrow_size, self._width * self.HEAD_WIDTH_FACTOR)
-            )
-        # 1. Ombra solo sul corpo (senza punta)
-        tr_shadow = QTransform().translate(self.SHADOW_OFFSET_PX, self.SHADOW_OFFSET_PX)
+        # 1. Ombra morbida (doppio layer per effetto soft)
+        tr_soft = QTransform().translate(self.SHADOW_OFFSET_PX + self.SHADOW_SOFT_PX, self.SHADOW_OFFSET_PX + self.SHADOW_SOFT_PX)
         painter.setPen(QPen(Qt.NoPen))
-        painter.setBrush(QBrush(QColor(0, 0, 0, 100)))
+        painter.setBrush(QBrush(QColor(0, 0, 0, self.SHADOW_SOFT_OPACITY)))
+        painter.drawPath(tr_soft.map(self._body_path_for_shadow))
+        tr_shadow = QTransform().translate(self.SHADOW_OFFSET_PX, self.SHADOW_OFFSET_PX)
+        painter.setBrush(QBrush(QColor(0, 0, 0, self.SHADOW_OPACITY)))
         painter.drawPath(tr_shadow.map(self._body_path_for_shadow))
-        # 2. Corpo e punte: poligono pieno con gradiente bevel (4+ color stop)
+        # 2. Faccia laterale 3D (immagine 2: giallo più scuro per profondità)
+        eff_w = self._width * self.THICKNESS_SCALE
+        depth_px = max(3, int(eff_w * self.DEPTH_OFFSET))
+        tr_depth = QTransform().translate(perp_x * depth_px, perp_y * depth_px)
+        side_color = QColor(max(0, self._color.red() - 45), max(0, self._color.green() - 45), max(0, self._color.blue() - 35))
+        painter.setBrush(QBrush(side_color))
+        painter.drawPath(tr_depth.map(path))
+        # 2a. Coda: faccia terminale rifinita (bordi smussati per transizione più pulita)
+        half_w = eff_w / 2
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        trim_s = self._arrow_size if self._head_at_start else 0
+        shaft_start_x = self._p1.x() + cos_a * trim_s
+        shaft_start_y = self._p1.y() + sin_a * trim_s
+        shaft_end_x = self._p2.x() - cos_a * self._arrow_size
+        shaft_end_y = self._p2.y() - sin_a * self._arrow_size
+        tail_x = shaft_start_x if not self._head_at_start else shaft_end_x
+        tail_y = shaft_start_y if not self._head_at_start else shaft_end_y
+        tail_a = QPointF(tail_x - perp_x * half_w, tail_y - perp_y * half_w)
+        tail_b = QPointF(tail_x + perp_x * half_w, tail_y + perp_y * half_w)
+        tail_c = QPointF(tail_x + perp_x * half_w + perp_x * depth_px,
+                        tail_y + perp_y * half_w + perp_y * depth_px)
+        tail_d = QPointF(tail_x - perp_x * half_w + perp_x * depth_px,
+                        tail_y - perp_y * half_w + perp_y * depth_px)
+        tail_cap = QPolygonF([tail_a, tail_b, tail_c, tail_d])
+        tail_cap_color = QColor(max(0, self._color.red() - 25), max(0, self._color.green() - 25), max(0, self._color.blue() - 20))
+        painter.setPen(QPen(Qt.NoPen))
+        painter.setBrush(QBrush(tail_cap_color))
+        painter.drawPolygon(tail_cap)
+        # 3. Faccia superiore: gradiente bevel (top luminoso, transizione ai lati)
         p_light = QPointF(cx - perp_x * half_len, cy - perp_y * half_len)
         p_dark = QPointF(cx + perp_x * half_len, cy + perp_y * half_len)
-        grad = _make_bevel_gradient(p_light, p_dark, self._color)
-        painter.setPen(QPen(Qt.NoPen))
+        grad = _make_bevel_gradient_3d(p_light, p_dark, self._color)
         painter.setBrush(QBrush(grad))
         painter.drawPath(path)
-        for poly in head_polys:
-            painter.drawPolygon(poly)
-        # 3. Highlight centrale: shape più stretta, accorciato (non sotto la punta)
-        hl_w = max(1, int(self._width * 0.35))
-        up_x, up_y = perp_x * (self._width * 0.3), perp_y * (self._width * 0.3)
+        # 4. Highlight speculare: sul lato superiore illuminato (effetto glossy)
+        hl_w = max(2, int(eff_w * self.HIGHLIGHT_WIDTH_FACTOR))
+        up_x, up_y = -perp_x * (eff_w * 0.22), -perp_y * (eff_w * 0.22)
         tr_hl = QTransform().translate(up_x, up_y)
         stroker_hl = QPainterPathStroker()
         stroker_hl.setWidth(hl_w)
         stroker_hl.setCapStyle(Qt.RoundCap)
         stroker_hl.setCurveThreshold(0.5)
         hl_path = stroker_hl.createStroke(tr_hl.map(self._highlight_centerline_path))
-        painter.setBrush(QBrush(QColor(255, 255, 255, int(255 * self.HIGHLIGHT_OPACITY))))
+        # Gradiente highlight: forte al centro, sfuma agli estremi
+        grad_hl = QLinearGradient(self._p1, self._p2)
+        grad_hl.setColorAt(0.0, QColor(255, 255, 255, 0))
+        grad_hl.setColorAt(0.3, QColor(255, 255, 255, int(255 * self.HIGHLIGHT_OPACITY_CENTER * 0.5)))
+        grad_hl.setColorAt(0.5, QColor(255, 255, 255, int(255 * self.HIGHLIGHT_OPACITY_CENTER)))
+        grad_hl.setColorAt(0.7, QColor(255, 255, 255, int(255 * self.HIGHLIGHT_OPACITY_CENTER * 0.5)))
+        grad_hl.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setBrush(QBrush(grad_hl))
+        painter.setPen(QPen(Qt.NoPen))
         painter.drawPath(hl_path)
-        # 4. Selezione
+        # 4b. Linea ombreggiata: disegnata DOPO faccia superiore (visibile sopra)
+        pt_tail_left = QPointF(tail_x - perp_x * half_w + perp_x * depth_px,
+                              tail_y - perp_y * half_w + perp_y * depth_px)
+        pt_tail_right = QPointF(tail_x + perp_x * half_w + perp_x * depth_px,
+                               tail_y + perp_y * half_w + perp_y * depth_px)
+        pt_start = QPointF(shaft_start_x + perp_x * half_w, shaft_start_y + perp_y * half_w)
+        pt_shaft_end = QPointF(shaft_end_x + perp_x * half_w, shaft_end_y + perp_y * half_w)
+        tip_pt = self._p2 if not self._head_at_start else self._p1
+        head_base_half = half_w * self.HEAD_WIDTH_FACTOR
+        head_cx = tip_pt.x() - cos_a * self._arrow_size
+        head_cy = tip_pt.y() - sin_a * self._arrow_size
+        head_base_bottom = QPointF(head_cx + perp_x * head_base_half, head_cy + perp_y * head_base_half)
+        tail_shaft_pt = pt_start if not self._head_at_start else pt_shaft_end
+        head_shaft_pt = pt_shaft_end if not self._head_at_start else pt_start
+        # Partenza da tail_shaft_pt per evitare FlatCap che sporge indietro dalla coda
+        edge_path = QPainterPath(tail_shaft_pt)
+        edge_path.lineTo(head_shaft_pt)
+        edge_path.lineTo(head_base_bottom)
+        near_tip = QPointF(
+            head_base_bottom.x() + 0.82 * (tip_pt.x() - head_base_bottom.x()),
+            head_base_bottom.y() + 0.82 * (tip_pt.y() - head_base_bottom.y())
+        )
+        edge_path.lineTo(near_tip)
+        line_color = QColor(max(0, self._color.red() - 100), max(0, self._color.green() - 100), max(0, self._color.blue() - 80))
+        pen_edge = QPen(line_color, max(1, int(eff_w) // 4), Qt.SolidLine, Qt.FlatCap, Qt.MiterJoin)
+        painter.setPen(pen_edge)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(edge_path)
+        painter.setPen(QPen(Qt.NoPen))
+        # 5. Selezione
         if self.isSelected():
             painter.setPen(QPen(QColor(255, 255, 255), 3, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
@@ -1695,6 +1781,10 @@ class DrawingOverlay(QGraphicsView):
     drawingConfirmed = pyqtSignal(object)  # Emesso quando annotazione confermata (da salvare come evento)
     drawingStarted = pyqtSignal()  # Emesso quando inizia il disegno (per freeze video)
     zoomRequested = pyqtSignal(int, int, int)  # delta, mouse_x, mouse_y (in coords overlay)
+    zoomZoneDefined = pyqtSignal(object)  # QRectF (in scene coords), None = cleared
+    zoomZoneCleared = pyqtSignal()
+    zoomZoneWheelRequested = pyqtSignal(int)  # delta (rotella sulla zona zoom)
+    zoomPanDelta = pyqtSignal(int, int)  # delta_x, delta_y (drag per spostare zoom)
     annotationDeleted = pyqtSignal(str, int)  # event_id, ann_index (per displayed items)
     annotationModified = pyqtSignal(str, int, object)  # event_id, ann_index, new_data (dopo move/resize)
     emptyAreaLeftClicked = pyqtSignal(int, int)  # x, y - quando tool=NONE e click fuori dalle forme (per Web UI)
@@ -1702,6 +1792,9 @@ class DrawingOverlay(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setScene(QGraphicsScene(self))
+        self._video_pixmap_item = QGraphicsPixmapItem()
+        self._video_pixmap_item.setZValue(-1000)
+        self.scene().addItem(self._video_pixmap_item)
         self.setRenderHint(QPainter.Antialiasing)
         self.setRenderHint(QPainter.SmoothPixmapTransform)
         self.setStyleSheet("background: transparent;")
@@ -1709,7 +1802,8 @@ class DrawingOverlay(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
-        self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         # Event filter su view e viewport per intercettare right-click
         self.viewport().installEventFilter(self)
         self.installEventFilter(self)
@@ -1739,15 +1833,59 @@ class DrawingOverlay(QGraphicsView):
         self._move_start_item_pos = None
         self._move_target_item = None  # item in trascinamento (testo o forma con maniglie)
         self._default_text_format: dict = {}  # formato per nuovo testo da TextFormatToolbar
+        self._zoom_zone_rect: Optional[QRectF] = None  # zona zoom (solo quella ingrandita)
+        self._zoom_pan_start: Optional[QPointF] = None  # posizione inizio drag pan (zoom/zoom zone)
 
         sc_copy = QShortcut(QKeySequence.Copy, self, self._copy_selected)
         sc_paste = QShortcut(QKeySequence.Paste, self, self._paste)
         sc_copy.setContext(Qt.ApplicationShortcut)
         sc_paste.setContext(Qt.ApplicationShortcut)
 
+    def setVideoPixmap(self, pixmap):
+        """Imposta il pixmap video (sfondo scena). Video e disegni nella stessa scena."""
+        self._video_pixmap_item.setPixmap(pixmap)
+        if pixmap and not pixmap.isNull():
+            w, h = max(1, pixmap.width()), max(1, pixmap.height())
+            self._video_pixmap_item.setPos(0, 0)
+            self.setSceneRect(0, 0, w, h)
+            self.fitSceneToView()
+
+    def clearVideoPixmap(self):
+        """Rimuove il video (nessun video caricato)."""
+        self._video_pixmap_item.setPixmap(QPixmap())
+
+    def getVideoSize(self):
+        """Ritorna (w, h) del pixmap video corrente, o (0, 0) se assente."""
+        pm = self._video_pixmap_item.pixmap()
+        if pm.isNull():
+            return 0, 0
+        return max(1, pm.width()), max(1, pm.height())
+
+    def resizeEvent(self, event):
+        """Al resize dell'overlay, adatta la scena alla view (disegni sempre in scala)."""
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self.fitSceneToView)
+
+    def showEvent(self, event):
+        """Al primo show, viewport può avere dimensioni valide solo ora."""
+        super().showEvent(event)
+        QTimer.singleShot(10, self.fitSceneToView)
+
     def setSceneRectFromView(self, rect: QRectF):
         self.setSceneRect(rect)
         self.fitInView(rect, Qt.KeepAspectRatio)
+
+    def fitSceneToView(self):
+        """Adatta la scena alla view mantenendo aspect ratio: disegni sempre contenuti nel video."""
+        sr = self.sceneRect()
+        if sr.width() <= 0 or sr.height() <= 0:
+            return
+        vw = max(1, self.viewport().width())
+        vh = max(1, self.viewport().height())
+        self.resetTransform()
+        # KeepAspectRatio: contenuto scalato per entrare nel viewport (nessuna estensione oltre)
+        self.fitInView(sr, Qt.KeepAspectRatio)
+        self.viewport().update()
 
     def _safe_remove_item(self, item):
         if item and item.scene() is self.scene():
@@ -1799,7 +1937,12 @@ class DrawingOverlay(QGraphicsView):
         raw = self._item_to_copy_data(item)
         if not raw:
             return None
-        return self._copy_data_to_serializable(raw)
+        out = self._copy_data_to_serializable(raw)
+        # Salva dimensioni view per ridimensionamento dinamico
+        w, h = max(1, int(self.sceneRect().width())), max(1, int(self.sceneRect().height()))
+        out["view_w"] = w
+        out["view_h"] = h
+        return out
 
     def _copy_data_to_serializable(self, data: dict) -> dict:
         """Converte copy_data (Qt types) in dict serializzabile."""
@@ -1821,6 +1964,70 @@ class DrawingOverlay(QGraphicsView):
                 out[k] = v.value if hasattr(v, "value") else str(v)
             else:
                 out[k] = v
+        return out
+
+    def _get_data_extent(self, data: dict) -> tuple:
+        """Ritorna (max_x, max_y) delle coordinate in data per fallback su disegni senza view_w/h."""
+        mx, my = 0.0, 0.0
+        def upd(d):
+            nonlocal mx, my
+            if isinstance(d, dict) and "x" in d and "y" in d:
+                mx = max(mx, d["x"])
+                my = max(my, d["y"])
+        for k in ("pos", "p1", "p2", "ctrl"):
+            if k in data:
+                upd(data[k])
+        if "rect" in data and isinstance(data["rect"], dict):
+            r = data["rect"]
+            mx = max(mx, r.get("x", 0) + r.get("w", 0))
+            my = max(my, r.get("y", 0) + r.get("h", 0))
+        for p in data.get("points", []):
+            upd(p)
+        for cmd in data.get("path", []):
+            if isinstance(cmd, dict):
+                upd(cmd)
+        return (mx, my)
+
+    def _scale_serializable_data(self, data: dict, sx: float, sy: float) -> dict:
+        """Scala coordinate in data per adattarsi a nuova dimensione view."""
+        if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+            return data
+        out = dict(data)
+        def scale_point(d):
+            if isinstance(d, dict) and "x" in d and "y" in d:
+                return {"x": d["x"] * sx, "y": d["y"] * sy}
+            return d
+        def scale_rect(r):
+            if isinstance(r, dict) and "x" in r:
+                return {"x": r["x"] * sx, "y": r["y"] * sy, "w": r.get("w", 0) * sx, "h": r.get("h", 0) * sy}
+            return r
+        for k in ("pos", "p1", "p2", "ctrl"):
+            if k in out and out[k]:
+                out[k] = scale_point(out[k])
+        if "rect" in out and out["rect"]:
+            out["rect"] = scale_rect(out["rect"])
+        if "points" in out and out["points"]:
+            out["points"] = [scale_point(p) for p in out["points"]]
+        if "path" in out and out["path"]:
+            scaled_path = []
+            for cmd in out["path"]:
+                if isinstance(cmd, dict):
+                    c = dict(cmd)
+                    if "x" in c:
+                        c["x"] = c["x"] * sx
+                    if "y" in c:
+                        c["y"] = c["y"] * sy
+                    scaled_path.append(c)
+                else:
+                    scaled_path.append(cmd)
+            out["path"] = scaled_path
+        for k in ("pen_width", "width"):
+            if k in out and isinstance(out[k], (int, float)):
+                out[k] = max(1, int(out[k] * min(sx, sy)))
+        if "font" in out and isinstance(out["font"], dict) and "pointSize" in out["font"]:
+            ps = out["font"]["pointSize"]
+            out["font"] = dict(out["font"])
+            out["font"]["pointSize"] = max(8, int(ps * min(sx, sy)))
         return out
 
     def _serializable_to_copy_data(self, data: dict) -> dict:
@@ -1990,12 +2197,27 @@ class DrawingOverlay(QGraphicsView):
     def setTool(self, tool: DrawTool):
         self._tool = tool
         self._start_pos = None
+        self._zoom_pan_start = None
         self._pencil_path = None
         self._polygon_points = []
         self._remove_polygon_preview()
         self._safe_remove_item(self._current_item)
         self._current_item = None
         self._clear_resize_handles()
+        if tool in (DrawTool.ZOOM, DrawTool.ZOOM_ZONE):
+            self.setCursor(Qt.OpenHandCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+
+    def getZoomZoneRect(self):
+        """Ritorna il rettangolo zona zoom (QRectF) o None."""
+        return QRectF(self._zoom_zone_rect) if self._zoom_zone_rect else None
+
+    def clearZoomZone(self):
+        """Rimuove la zona zoom."""
+        self._zoom_zone_rect = None
+        self.zoomZoneDefined.emit(None)
+        self.zoomZoneCleared.emit()
 
     def setColor(self, color: QColor):
         self._color = color
@@ -2041,11 +2263,18 @@ class DrawingOverlay(QGraphicsView):
             self.drawingConfirmed.emit(item)
 
     def wheelEvent(self, event: QWheelEvent):
-        """Con strumento Zoom attivo: zoom continuo (max 5x) via rotella verso il puntatore."""
+        """Zoom: strumento Zoom attivo O rotella sopra zona zoom."""
         if self._tool == DrawTool.ZOOM:
             pos = event.pos()
             self.zoomRequested.emit(event.angleDelta().y(), int(pos.x()), int(pos.y()))
             event.accept()
+        elif self._zoom_zone_rect:
+            scene_pos = self.mapToScene(event.pos())
+            if self._zoom_zone_rect.contains(scene_pos):
+                self.zoomZoneWheelRequested.emit(event.angleDelta().y())
+                event.accept()
+            else:
+                super().wheelEvent(event)
         else:
             super().wheelEvent(event)
 
@@ -2085,7 +2314,17 @@ class DrawingOverlay(QGraphicsView):
                 self._select_shape(hit_item)
                 event.accept()
                 return
-            # Clic fuori: deseleziona (ma non se stiamo costruendo un poligono)
+            # Clic fuori: pan per Zoom/Zoom Zone, altrimenti deseleziona
+            if self._tool == DrawTool.ZOOM:
+                self._zoom_pan_start = QPointF(scene_pos)
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
+            if self._tool == DrawTool.ZOOM_ZONE and self._zoom_zone_rect and self._zoom_zone_rect.contains(scene_pos):
+                self._zoom_pan_start = QPointF(scene_pos)
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
             if self._tool != DrawTool.POLYGON or not self._polygon_points:
                 self._deselect_shape()
                 self._resize_drag_handle_index = None
@@ -2116,19 +2355,33 @@ class DrawingOverlay(QGraphicsView):
             scene_pos = self.mapToScene(event.pos())
             self._clear_resize_handles()
             self._start_freeze()
-            fmt = self._default_text_format
-            color = fmt.get("text_color", QColor(Qt.white)) if fmt else QColor(Qt.white)
-            item = DrawableText("", color)
-            if fmt:
-                item.apply_format(fmt)
-            item.setPos(scene_pos)
-            item.setTextInteractionFlags(Qt.TextEditorInteraction)
-            item._confirm_callback = lambda it=item: self._emit_text_confirmed(it)
-            self.scene().addItem(item)
-            self._items.append(item)
-            self.drawingAdded.emit(item)
-            self.scene().setFocusItem(item)
-            self.setFocus()
+            dlg = AddTextDialog(None)  # parent=None per evitare ereditarietà stylesheet scura
+            if dlg.exec_() == QDialog.Accepted:
+                r = dlg.get_result()
+                if r[0]:  # testo non vuoto
+                    color = r[3] if hasattr(r[3], "red") else QColor(Qt.white)
+                    item = DrawableText(r[0], color)
+                    fmt = {
+                        "font_family": r[1],
+                        "font_size": r[2],
+                        "text_color": color,
+                        "bold": r[4],
+                        "italic": r[5],
+                        "underline": r[6],
+                        "fill_color": r[8] if r[8] and hasattr(r[8], "red") else QColor(0, 0, 0, 0),
+                        "outline_color": r[7] if r[7] and hasattr(r[7], "red") else QColor(255, 255, 255),
+                        "outline_width": r[11] if len(r) >= 12 and r[11] > 0 else 0,
+                        "line_spacing_percent": r[12] if len(r) >= 13 else 100,
+                    }
+                    if fmt["outline_width"] == 0 and fmt["outline_color"] and r[7]:
+                        fmt["outline_width"] = 1
+                    item.apply_format(fmt)
+                    item.setPos(scene_pos)
+                    item._confirm_callback = lambda it=item: self._emit_text_confirmed(it)
+                    self.scene().addItem(item)
+                    self._items.append(item)
+                    self.drawingAdded.emit(item)
+                    self._emit_text_confirmed(item)
             event.accept()
             return
         if event.button() == Qt.LeftButton and self._tool not in (DrawTool.NONE, DrawTool.ZOOM, DrawTool.POLYGON):
@@ -2156,6 +2409,17 @@ class DrawingOverlay(QGraphicsView):
             # event.pos() è relativo a obj; converti in coordinate view
             view_pos = obj.mapTo(self, event.pos()) if obj is self.viewport() else event.pos()
             scene_pos = self.mapToScene(view_pos)
+            gp = event.globalPos()
+            global_pt = QPoint(gp.x(), gp.y()) if hasattr(gp, 'x') else self.mapToGlobal(event.pos())
+            # Click sulla zona zoom: menu "Elimina"
+            if self._zoom_zone_rect and self._zoom_zone_rect.contains(scene_pos):
+                menu = QMenu(self)
+                menu.setStyleSheet(self._CONTEXT_MENU_STYLE)
+                elimina_action = menu.addAction("Elimina")
+                if menu.exec_(global_pt) == elimina_action:
+                    self.clearZoomZone()
+                event.accept()
+                return True
             tol = 25
             r = QRectF(scene_pos.x() - tol, scene_pos.y() - tol, tol * 2, tol * 2)
             target = None
@@ -2167,8 +2431,6 @@ class DrawingOverlay(QGraphicsView):
                 if t is not None:
                     target = t
                     break
-            gp = event.globalPos()
-            global_pt = QPoint(gp.x(), gp.y()) if hasattr(gp, 'x') else self.mapToGlobal(event.pos())
             self._show_context_menu(global_pt, target)
             event.accept()
             return True  # Consuma l'evento, impedisce elaborazione successiva
@@ -2289,13 +2551,48 @@ class DrawingOverlay(QGraphicsView):
             elimina_action = menu.addAction("Elimina")
             action = menu.exec_(pos)
             if action == personalizza_action:
-                dlg = TextPersonalizeDialog(target, self)
+                t = target.get_format()
+                init = {
+                    "text": target.toPlainText(),
+                    "font_family": t.get("font_family", "Arial"),
+                    "font_size": t.get("font_size", 24),
+                    "color": t.get("text_color", QColor(Qt.white)),
+                    "bold": t.get("bold", False),
+                    "italic": t.get("italic", False),
+                    "underline": t.get("underline", False),
+                    "outline_color": t.get("outline_color"),
+                    "bg_color": t.get("fill_color") if t.get("fill_color") and t.get("fill_color").alpha() > 0 else None,
+                    "bg_outline_color": None,
+                    "bg_outline_thickness": 2,
+                    "outline_thickness": t.get("outline_width", 0),
+                    "line_spacing": t.get("line_spacing_percent", 100),
+                }
+                dlg = AddTextDialog(None)  # parent=None per evitare ereditarietà stylesheet scura
+                dlg.set_initial_data(init)
                 if dlg.exec_() == QDialog.Accepted:
-                    fmt = dlg.get_format()
-                    target.apply_format(fmt)
-                    target.update()
-                    self.set_default_text_format(fmt)
-                    self._persist_displayed_item_if_needed(target)
+                    r = dlg.get_result()
+                    if r[0]:
+                        target.setPlainText(r[0])
+                        color = r[3] if hasattr(r[3], "red") else QColor(Qt.white)
+                        target.setDefaultTextColor(color)
+                        fmt = {
+                            "font_family": r[1],
+                            "font_size": r[2],
+                            "text_color": color,
+                            "bold": r[4],
+                            "italic": r[5],
+                            "underline": r[6],
+                            "fill_color": r[8] if r[8] and hasattr(r[8], "red") else QColor(0, 0, 0, 0),
+                            "outline_color": r[7] if r[7] and hasattr(r[7], "red") else QColor(255, 255, 255),
+                            "outline_width": r[11] if len(r) >= 12 and r[11] > 0 else 0,
+                            "line_spacing_percent": r[12] if len(r) >= 13 else 100,
+                        }
+                        if fmt["outline_width"] == 0 and r[7]:
+                            fmt["outline_width"] = 1
+                        target.apply_format(fmt)
+                        target.update()
+                        self.set_default_text_format({"text_color": color, "font_family": r[1], "font_size": r[2], "bold": r[4], "italic": r[5], "underline": r[6], "fill_color": fmt["fill_color"]})
+                        self._persist_displayed_item_if_needed(target)
             elif action == duplica_action:
                 data = self._item_to_copy_data(target)
                 if data:
@@ -2633,6 +2930,15 @@ class DrawingOverlay(QGraphicsView):
                 self._reposition_resize_handles()
 
     def mouseMoveEvent(self, event):
+        # Pan zoom / zoom zone (manina)
+        if self._zoom_pan_start is not None:
+            scene_pos = self.mapToScene(event.pos())
+            dx = int(scene_pos.x() - self._zoom_pan_start.x())
+            dy = int(scene_pos.y() - self._zoom_pan_start.y())
+            self._zoom_pan_start = QPointF(scene_pos)
+            self.zoomPanDelta.emit(dx, dy)
+            event.accept()
+            return
         # Trascinamento per spostare la forma (o il testo)
         if self._is_moving and self._move_target_item:
             scene_pos = self.mapToScene(event.pos())
@@ -2666,7 +2972,8 @@ class DrawingOverlay(QGraphicsView):
             self.scene().addItem(self._current_item)
         elif self._start_pos and self._tool in (DrawTool.CIRCLE, DrawTool.ARROW, DrawTool.LINE, DrawTool.RECTANGLE, DrawTool.CONE,
                                                DrawTool.CURVED_LINE, DrawTool.CURVED_ARROW, DrawTool.PARABOLA_ARROW,
-                                               DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW, DrawTool.DOUBLE_ARROW, DrawTool.DASHED_LINE):
+                                               DrawTool.DASHED_ARROW, DrawTool.ZIGZAG_ARROW, DrawTool.DOUBLE_ARROW, DrawTool.DASHED_LINE,
+                                               DrawTool.ZOOM_ZONE):
             pos = self.mapToScene(event.pos())
             self._safe_remove_item(self._current_item)
             style, is_arrow, _ = _get_arrow_line_tool_params(self._tool, self._arrow_line_style)
@@ -2679,10 +2986,12 @@ class DrawingOverlay(QGraphicsView):
                     pen.setStyle(Qt.DashLine)
                 self._current_item.setPen(pen)
                 self._current_item.setBrush(QBrush(Qt.NoBrush))
-            elif self._tool == DrawTool.RECTANGLE:
+            elif self._tool in (DrawTool.RECTANGLE, DrawTool.ZOOM_ZONE):
                 r = QRectF(self._start_pos, pos).normalized()
                 self._current_item = QGraphicsRectItem(r)
                 pen = QPen(self._color, self._pen_width)
+                if self._tool == DrawTool.ZOOM_ZONE:
+                    pen.setStyle(Qt.DashLine)
                 self._current_item.setPen(pen)
                 self._current_item.setBrush(QBrush(Qt.NoBrush))
             elif self._tool == DrawTool.CIRCLE:
@@ -2718,6 +3027,10 @@ class DrawingOverlay(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            if self._zoom_pan_start is not None:
+                self._zoom_pan_start = None
+                if self._tool in (DrawTool.ZOOM, DrawTool.ZOOM_ZONE):
+                    self.setCursor(Qt.OpenHandCursor)
             if self._move_target_item is not None or self._resize_target_item is not None:
                 modified_item = self._move_target_item or self._resize_target_item
                 if modified_item in self._displayed_items:
@@ -2777,6 +3090,13 @@ class DrawingOverlay(QGraphicsView):
                 self._items.append(item)
                 self.drawingAdded.emit(item)
                 self.drawingConfirmed.emit(item)
+                self._current_item = None
+            elif self._tool == DrawTool.ZOOM_ZONE and self._current_item:
+                r = QRectF(self._start_pos, pos).normalized()
+                if r.width() >= 10 and r.height() >= 10:  # minimo 10x10 px
+                    self._zoom_zone_rect = r
+                    self.zoomZoneDefined.emit(r)
+                self._safe_remove_item(self._current_item)
                 self._current_item = None
             elif self._tool == DrawTool.CONE and self._current_item:
                 self._items.append(self._current_item)
@@ -2864,23 +3184,42 @@ class DrawingOverlay(QGraphicsView):
         for item in self._items + self._displayed_items:
             item.setVisible(visible)
 
-    def loadDrawingsFromProject(self, drawings_list):
-        """Carica i disegni da lista di DrawingItem o dict (annotazioni) per il timestamp corrente.
-        Gli item sono editabili (selectable, movable) quando video in pausa.
-        drawings_list può contenere: dict con type, oppure dict con data/event_id/ann_index."""
+    def loadDrawingsFromProject(self, drawings_list, view_w_override=None, view_h_override=None):
+        """Carica i disegni. Se hanno view_w/view_h, usa fitInView per scalare al resize (no scaling dati).
+        Per dati vecchi senza view_w/h: scala le coordinate per farle entrare."""
         self._clear_displayed_items()
+        cw = max(1, int(view_w_override if view_w_override is not None else self.sceneRect().width()))
+        ch = max(1, int(view_h_override if view_h_override is not None else self.sceneRect().height()))
+        scene_ref_w, scene_ref_h = None, None
         for d in drawings_list:
             event_id, ann_index = None, None
             if hasattr(d, "data") and d.data:
-                raw = d.data
+                raw = dict(d.data)
             elif isinstance(d, dict):
-                raw = d.get("data") or d
+                raw = dict(d.get("data") or d)
                 event_id = d.get("event_id")
                 ann_index = d.get("ann_index")
                 if not raw or not raw.get("type"):
                     continue
             else:
                 continue
+            rw = raw.pop("view_w", None)
+            rh = raw.pop("view_h", None)
+            if rw and rh and rw > 0 and rh > 0:
+                if scene_ref_w is None:
+                    scene_ref_w, scene_ref_h = rw, rh
+                else:
+                    scene_ref_w = max(scene_ref_w, rw)
+                    scene_ref_h = max(scene_ref_h, rh)
+                # Con scena unificata: scala coordinate se view_w/h diversi da scene corrente
+                if cw > 0 and ch > 0 and (abs(rw - cw) > 1 or abs(rh - ch) > 1):
+                    raw = self._scale_serializable_data(raw, cw / rw, ch / rh)
+            else:
+                ex, ey = self._get_data_extent(raw)
+                pad = 60
+                ref_w = max(cw, ex + pad)
+                ref_h = max(ch, ey + pad)
+                raw = self._scale_serializable_data(raw, cw / ref_w, ch / ref_h)
             data = self._serializable_to_copy_data(raw)
             data["pos"] = data.get("pos", _deserialize_point({"x": 0, "y": 0}))
             item = self._copy_data_to_item(data, offset_x=0, offset_y=0)
@@ -2892,6 +3231,14 @@ class DrawingOverlay(QGraphicsView):
                 self.scene().addItem(item)
                 self._displayed_items.append(item)
                 self._items.append(item)
+        # Scena unificata: scene rect da video (cw, ch) quando override, altrimenti da drawings
+        if view_w_override is not None and view_h_override is not None and view_w_override > 0 and view_h_override > 0:
+            self.setSceneRect(0, 0, view_w_override, view_h_override)
+        elif scene_ref_w and scene_ref_h:
+            self.setSceneRect(0, 0, scene_ref_w, scene_ref_h)
+        else:
+            self.setSceneRect(0, 0, cw, ch)
+        self.fitSceneToView()
 
     def removeItemForSave(self, item):
         """Rimuove item da _items dopo averlo salvato in project (verrà mostrato da loadDrawingsFromProject)."""

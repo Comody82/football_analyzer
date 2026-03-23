@@ -11,9 +11,9 @@
     --bg-elevated: #1a2332;
     --bg-hover: #243447;
     
-    --accent-primary: #12a88a;
-    --accent-hover: #0f9378;
-    --accent-glow: rgba(18, 168, 138, 0.3);
+    --accent-primary: #4a6fa5;
+    --accent-hover: #5a82b8;
+    --accent-glow: rgba(74, 111, 165, 0.3);
     
     --text-primary: #f0f6fc;
     --text-secondary: #8b9bb8;
@@ -65,16 +65,62 @@ html, body {
 
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg-primary);
+    background: transparent;
     color: var(--text-primary);
     overflow: hidden;
     margin: 0;
     padding: 0;
 }
 
+/* Sfondo blu-grigio: più chiaro al centro (bianco/blu-grigio), scuro ai bordi */
+html {
+    position: relative;
+    background:
+        radial-gradient(ellipse 85% 85% at 50% 50%, #1e2636 0%, #18202e 25%, #121a26 45%, #0e141c 65%, #0a0e14 85%, #080c10 100%);
+    min-height: 100%;
+}
+
+html::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: radial-gradient(
+        ellipse 80% 80% at 50% 50%,
+        rgba(255, 255, 255, 0.03) 0%,
+        transparent 50%,
+        rgba(0, 0, 0, 0.2) 100%
+    );
+}
+
+/* Nebula / Macchie lucenti #715C66 - div DOM, position:fixed obbligatorio */
+.nebula-bg {
+    position: fixed !important;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle 20% at 15% 20%, rgba(130, 105, 118, 0.65) 0%, rgba(113, 92, 102, 0.4) 40%, transparent 65%),
+        radial-gradient(circle 16% at 90% 15%, rgba(125, 100, 112, 0.6) 0%, transparent 55%),
+        radial-gradient(circle 22% at 78% 80%, rgba(113, 92, 102, 0.55) 0%, rgba(95, 78, 88, 0.25) 50%, transparent 70%),
+        radial-gradient(circle 18% at 20% 75%, rgba(118, 95, 106, 0.6) 0%, transparent 58%),
+        radial-gradient(circle 14% at 50% 35%, rgba(113, 92, 102, 0.55) 0%, transparent 52%),
+        radial-gradient(circle 20% at 35% 55%, rgba(120, 98, 108, 0.5) 0%, transparent 55%),
+        radial-gradient(circle 15% at 95% 60%, rgba(108, 88, 98, 0.6) 0%, transparent 52%),
+        radial-gradient(circle 12% at 8% 90%, rgba(113, 92, 102, 0.55) 0%, transparent 48%),
+        radial-gradient(circle 14% at 70% 12%, rgba(118, 95, 106, 0.5) 0%, transparent 50%),
+        radial-gradient(circle 16% at 55% 85%, rgba(105, 86, 96, 0.5) 0%, transparent 55%);
+}
+body > .sidebar-container,
+body > .controls-container {
+    position: relative;
+    z-index: 1;
+}
+
 /* Body types per 3 HTML separati */
 .sidebar-body {
-    background: var(--bg-secondary);
+    background: transparent;
     padding: var(--spacing-lg);
     height: 100vh;
 }
@@ -363,10 +409,11 @@ body.sidebar-left .section-title {
 .event-list-container {
     min-height: 180px;
     max-height: 300px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-emphasis);
+    background: linear-gradient(180deg, rgba(10, 14, 24, 0.6) 0%, rgba(6, 10, 18, 0.7) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: var(--radius-md);
     padding: var(--spacing-sm);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -719,21 +766,21 @@ body.sidebar-left .section-title {
 
 .clip-editing .edit-actions .btn-save-gradient {
     background: linear-gradient(90deg, 
-        #0a9b82 0%, 
-        #0dab90 25%, 
-        #12a88a 50%, 
-        #15c2a2 75%, 
-        #19e6c1 100%);
-    border: 1px solid rgba(25, 230, 193, 0.4);
+        #2d4a6a 0%, 
+        #3d5f8a 25%, 
+        #4a6fa5 50%, 
+        #5a82b5 75%, 
+        #6b92c4 100%);
+    border: 1px solid rgba(90, 130, 181, 0.4);
     box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .clip-editing .edit-actions .btn-save-gradient:hover {
     background: linear-gradient(90deg, 
-        #0dab90 0%, 
-        #12a88a 30%, 
-        #15c2a2 60%, 
-        #19e6c1 100%);
+        #35567a 0%, 
+        #4a6fa5 30%, 
+        #5a82b5 60%, 
+        #6b92c4 100%);
 }
 
 .clip-editing .btn-cancel {
@@ -901,6 +948,38 @@ body.sidebar-left .section-title {
     gap: var(--spacing-sm);
 }
 
+.analysis-buttons-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.analysis-step-section {
+    margin-top: var(--spacing-xs);
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.draw-tools-sublabel {
+    font-size: 11px;
+    color: var(--text-tertiary, var(--text-secondary));
+    font-weight: 400;
+    margin-bottom: 2px;
+    display: block;
+}
+
+.btn-analysis-main {
+    font-weight: 600;
+    background: var(--accent-primary, #3b82f6);
+    color: #fff;
+    border-color: var(--accent-primary, #3b82f6);
+}
+
+.btn-analysis-main:hover {
+    filter: brightness(1.1);
+}
+
 .tool-btn {
     width: 36px;
     height: 36px;
@@ -967,6 +1046,15 @@ body.sidebar-left .section-title {
     border-color: var(--accent-primary);
 }
 
+.btn-control-sm {
+    min-width: 36px;
+    padding: 8px 10px;
+}
+.btn-control.active {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+}
+
 .btn-play {
     background: var(--accent-primary);
     color: white;
@@ -1011,6 +1099,53 @@ body.sidebar-left .section-title {
     font-family: 'Courier New', monospace;
 }
 
+/* Zoom bar */
+.zoom-bar-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    min-width: 140px;
+}
+.zoom-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+.zoom-slider {
+    flex: 1;
+    min-width: 80px;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right, var(--accent-primary) 0, var(--accent-primary) var(--zoom-pct, 0%), var(--bg-elevated) var(--zoom-pct, 0%) 100%);
+    border-radius: 3px;
+    outline: none;
+}
+.zoom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    border: 2px solid var(--accent-primary);
+    cursor: pointer;
+}
+.zoom-slider::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 3px;
+}
+.zoom-value {
+    font-size: 12px;
+    color: var(--text-secondary);
+    min-width: 28px;
+    font-family: 'Courier New', monospace;
+}
+.zoom-slider-readonly {
+    pointer-events: none;
+    opacity: 0.9;
+}
+
 /* ============================================
    Scrollbar Styling
    ============================================ */
@@ -1047,8 +1182,8 @@ body.sidebar-left .section-title {
     --bg-elevated: #162233;
     --bg-hover: #1B2A3F;
 
-    --accent-primary: #1F8F6B;
-    --accent-hover: #1F8F6B;
+    --accent-primary: #4a6fa5;
+    --accent-hover: #5a82b8;
     --accent-glow: rgba(44, 242, 179, 0.35);
 
     --text-primary: #E6EDF5;
@@ -1066,8 +1201,8 @@ body.sidebar-left .section-title {
 body,
 .center-body,
 .sidebar-body {
-    background: radial-gradient(circle at 20% 20%, #0F1724 0%, #0B1220 40%, #070C16 100%) !important;
     position: relative;
+    background: transparent !important;
 }
 
 body::before {
@@ -1084,7 +1219,7 @@ body::before {
     background-position: 0 0, 1px 1px;
 }
 
-body > * {
+body > *:not(.nebula-bg) {
     position: relative;
     z-index: 1;
 }
@@ -1104,14 +1239,14 @@ body > * {
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.06) !important;
     border-radius: 14px !important;
-    box-shadow: 0 0 0 1px rgba(0, 255, 170, 0.05), 0 8px 30px rgba(0, 0, 0, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(74, 111, 165, 0.08), 0 8px 30px rgba(0, 0, 0, 0.4) !important;
 }
 
 /* Primary buttons */
 .btn-accent,
 .btn-primary,
 .btn-play {
-    background: linear-gradient(135deg, #1F8F6B, #2CF2B3) !important;
+    background: linear-gradient(135deg, #3d5f8a, #5a82b5) !important;
     color: #FFFFFF !important;
     border: none !important;
     border-radius: 8px !important;
@@ -1170,7 +1305,7 @@ body > * {
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.06) !important;
     border-radius: 14px !important;
-    box-shadow: 0 0 0 1px rgba(0, 255, 170, 0.05), 0 8px 30px rgba(0, 0, 0, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(74, 111, 165, 0.08), 0 8px 30px rgba(0, 0, 0, 0.4) !important;
 }
 
 .clip-card:hover {
@@ -1178,7 +1313,7 @@ body > * {
 }
 
 .clip-card.playing {
-    border-left: 3px solid #1F8F6B !important;
+    border-left: 3px solid #4a6fa5 !important;
 }
 
 /* CSS timeline widgets (non-canvas) */
@@ -1189,12 +1324,12 @@ body > * {
 
 .timeline-progress,
 .progress-section .timeline-progress {
-    background: linear-gradient(90deg, #1F8F6B, #2CF2B3) !important;
+    background: linear-gradient(90deg, #3d5f8a, #5a82b5) !important;
 }
 
 .timeline-handle,
 .progress-section .timeline-handle {
-    background: #1F8F6B !important;
+    background: #4a6fa5 !important;
     box-shadow: 0 0 10px rgba(44, 242, 179, 0.35) !important;
 }
 
@@ -1206,21 +1341,16 @@ html, body {
     height: 100%;
 }
 
+/* body trasparente: lo sfondo profondo viene da html */
 body.center-body,
 body.sidebar-body,
 body.sidebar-body.sidebar-left {
-    background:
-        radial-gradient(circle at 20% 20%, #0F1724 0%, #0B1220 40%, #070C16 100%),
-        radial-gradient(rgba(255,255,255,0.045) 0.45px, transparent 0.45px),
-        radial-gradient(rgba(255,255,255,0.025) 0.45px, transparent 0.45px) !important;
-    background-size: auto, 3px 3px, 5px 5px !important;
-    background-position: center center, 0 0, 1px 1px !important;
+    background: transparent !important;
 }
 
 /* Sidebar real containers */
 body.sidebar-body > .sidebar-container,
 body.sidebar-body > .sidebar-container > .right-tabs,
-body.sidebar-left .event-list-container,
 body.sidebar-body #tabStatistiche .stats-section,
 body.sidebar-body #tabClip .sidebar-section {
     background: rgba(20, 28, 45, 0.65) !important;
@@ -1228,21 +1358,37 @@ body.sidebar-body #tabClip .sidebar-section {
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.06) !important;
     border-radius: 14px !important;
-    box-shadow: 0 0 0 1px rgba(0,255,170,0.05), 0 8px 30px rgba(0,0,0,0.4) !important;
+    box-shadow: 0 0 0 1px rgba(74, 111, 165, 0.08), 0 8px 30px rgba(0,0,0,0.4) !important;
 }
 
-/* Center panel real containers */
+/* Colonna Eventi: glass blu-grigio (no verde), in linea con top bar */
+body.sidebar-left > .sidebar-container {
+    background: linear-gradient(180deg, rgba(16, 22, 36, 0.45) 0%, rgba(12, 18, 28, 0.5) 50%, rgba(10, 14, 24, 0.48) 100%) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 24px rgba(0, 0, 0, 0.2) !important;
+}
+body.sidebar-left .event-list-container {
+    background: linear-gradient(180deg, rgba(12, 18, 28, 0.5) 0%, rgba(16, 22, 34, 0.4) 30%, rgba(10, 16, 26, 0.5) 100%) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 6px 20px rgba(0, 0, 0, 0.18) !important;
+}
+
+/* Colonna Clip: stesso stile blu-grigio */
+body.sidebar-right > .sidebar-container {
+    background: linear-gradient(180deg, rgba(16, 22, 36, 0.45) 0%, rgba(12, 18, 28, 0.5) 50%, rgba(10, 14, 24, 0.48) 100%) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 24px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Centro (controlli/timeline): glass blu-grigio come top bar, senza verde */
 body.center-body > .controls-container,
 body.center-body .progress-section,
 body.center-body .timeline-events-section,
 body.center-body .timeline-canvas-wrapper,
 body.center-body .draw-tools-section {
-    background: rgba(20, 28, 45, 0.65) !important;
+    background: linear-gradient(180deg, rgba(16, 22, 36, 0.55) 0%, rgba(12, 18, 28, 0.6) 50%, rgba(10, 14, 24, 0.55) 100%) !important;
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.06) !important;
     border-radius: 14px !important;
-    box-shadow: 0 0 0 1px rgba(0,255,170,0.05), 0 8px 30px rgba(0,0,0,0.4) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0, 0, 0, 0.25) !important;
 }
 
 /* Clip area real selectors */
@@ -1252,7 +1398,7 @@ body.sidebar-body .clips-container .clip-card {
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.06) !important;
     border-radius: 14px !important;
-    box-shadow: 0 0 0 1px rgba(0,255,170,0.05), 0 8px 30px rgba(0,0,0,0.4) !important;
+    box-shadow: 0 0 0 1px rgba(74, 111, 165, 0.08), 0 8px 30px rgba(0,0,0,0.4) !important;
 }
 
 /* Primary buttons exact selectors used */
@@ -1260,11 +1406,11 @@ body.sidebar-left #btnOpenVideo,
 body.center-body #btnPlay,
 body.sidebar-body .btn-primary,
 body.sidebar-body .btn-accent {
-    background: linear-gradient(135deg, #1F8F6B, #2CF2B3) !important;
+    background: linear-gradient(135deg, #3d5f8a, #5a82b5) !important;
     color: #FFFFFF !important;
     border: none !important;
     border-radius: 8px !important;
-    box-shadow: 0 0 12px rgba(44,242,179,0.35) !important;
+    box-shadow: 0 0 12px rgba(74, 111, 165, 0.35) !important;
 }
 
 body.sidebar-left #btnOpenVideo:hover,
@@ -1289,7 +1435,7 @@ body.sidebar-left .event-list-section {
 body.center-body .timeline-canvas-wrapper,
 body.center-body .progress-section {
     box-shadow:
-        0 0 0 1px rgba(0,255,170,0.06),
+        0 0 0 1px rgba(74, 111, 165, 0.1),
         inset 0 1px 0 rgba(255,255,255,0.04),
         0 14px 34px rgba(0,0,0,0.45) !important;
 }
@@ -1300,12 +1446,12 @@ body.center-body .progress-section {
 
 :root {
     /* Green tuned: less flat, more atmospheric */
-    --accent-primary: #1B7E61;
+    --accent-primary: #4a6fa5;
     --accent-hover: #23906F;
     --accent-glow: rgba(44, 242, 179, 0.24);
 }
 
-/* Global ambient light + vignette */
+/* Global ambient light - blu-grigio, no verde */
 body.center-body::before,
 body.sidebar-body::before,
 body.sidebar-body.sidebar-left::before {
@@ -1315,8 +1461,8 @@ body.sidebar-body.sidebar-left::before {
     pointer-events: none;
     z-index: 0;
     background:
-        radial-gradient(ellipse at 52% 42%, rgba(44, 242, 179, 0.12) 0%, rgba(44, 242, 179, 0.04) 22%, rgba(0, 0, 0, 0) 58%),
-        radial-gradient(ellipse at 18% 16%, rgba(120, 170, 255, 0.08) 0%, rgba(0, 0, 0, 0) 45%);
+        radial-gradient(ellipse at 50% 45%, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0) 50%),
+        radial-gradient(ellipse at 18% 16%, rgba(100, 130, 170, 0.06) 0%, rgba(0, 0, 0, 0) 45%);
     mix-blend-mode: screen;
 }
 
@@ -1346,7 +1492,7 @@ body.sidebar-body .clips-container .clip-card {
         inset 0 18px 30px rgba(255, 255, 255, 0.015),
         0 20px 48px rgba(0, 0, 0, 0.52),
         0 8px 20px rgba(0, 0, 0, 0.38),
-        0 0 0 1px rgba(0, 255, 170, 0.06) !important;
+        0 0 0 1px rgba(74, 111, 165, 0.1) !important;
 }
 
 /* Extra top-edge highlight to reinforce glass realism */
@@ -1379,7 +1525,7 @@ body.sidebar-left #btnOpenVideo,
 body.center-body #btnPlay,
 body.sidebar-body .btn-primary,
 body.sidebar-body .btn-accent {
-    background: linear-gradient(135deg, #1B7E61, #27B48D) !important;
+    background: linear-gradient(135deg, #3d5f8a, #5a82b5) !important;
     box-shadow:
         0 0 14px rgba(44, 242, 179, 0.22),
         0 10px 22px rgba(0, 0, 0, 0.40) !important;
@@ -1397,13 +1543,13 @@ body.sidebar-body .btn-accent:hover {
 /* Timeline UI widgets: less flat green, more diffusion */
 .timeline-progress,
 .progress-section .timeline-progress {
-    background: linear-gradient(90deg, #1B7E61, #27B48D) !important;
+    background: linear-gradient(90deg, #3d5f8a, #5a82b5) !important;
     box-shadow: 0 0 10px rgba(44, 242, 179, 0.16);
 }
 
 .timeline-handle,
 .progress-section .timeline-handle {
-    background: #1B7E61 !important;
+    background: #4a6fa5 !important;
     box-shadow: 0 0 14px rgba(44, 242, 179, 0.30), 0 0 0 1px rgba(44, 242, 179, 0.22) !important;
 }
 
@@ -1414,7 +1560,7 @@ body.sidebar-body .btn-accent:hover {
 :root {
     --bg-primary: #0B1220;
     --bg-elevated: rgba(20, 28, 45, 0.68);
-    --accent-primary: #1B7E61;
+    --accent-primary: #4a6fa5;
     --text-primary: #E6EDF5;
     --border-soft: rgba(255, 255, 255, 0.06);
 }
@@ -1471,7 +1617,7 @@ body.sidebar-body .btn-accent:hover {
 }
 
 .topbar-btn.topbar-action {
-    background: linear-gradient(135deg, #1B7E61, #27B48D);
+    background: linear-gradient(135deg, #3d5f8a, #5a82b5);
     border: none;
 }
 
@@ -1663,25 +1809,27 @@ body.sidebar-body .btn-accent:hover {
 }
 
 .event-list-item {
-    background: rgba(20, 28, 45, 0.72) !important;
-    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    background: linear-gradient(135deg, rgba(18, 28, 48, 0.85) 0%, rgba(12, 20, 38, 0.82) 100%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.07) !important;
     border-left: 4px solid transparent !important;
     border-radius: 10px !important;
     padding: 10px 12px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28) !important;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
     transform: translateX(0);
 }
 
 .event-list-item:hover {
-    background: #162233 !important;
-    border-color: rgba(255, 255, 255, 0.09) !important;
-    transform: translateY(-1px);
+    background: linear-gradient(135deg, rgba(24, 36, 58, 0.9) 0%, rgba(18, 28, 48, 0.88) 100%) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35) !important;
 }
 
 .event-list-item.selected {
-    background: #1A2C3F !important;
-    border-left: 4px solid #1B7E61 !important;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34) !important;
+    background: linear-gradient(135deg, rgba(26, 44, 63, 0.95) 0%, rgba(20, 36, 56, 0.9) 100%) !important;
+    border-left: 4px solid #4a6fa5 !important;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4), 0 0 20px rgba(27, 126, 97, 0.12) !important;
 }
 
 .event-item-header {
@@ -1770,7 +1918,7 @@ body.sidebar-body .btn-accent:hover {
 }
 
 .clip-card.playing .clip-actions-slot::after {
-    background: linear-gradient(90deg, #1B7E61 var(--progress), rgba(255, 255, 255, 0.10) var(--progress));
+    background: linear-gradient(90deg, #4a6fa5 var(--progress), rgba(255, 255, 255, 0.10) var(--progress));
 }
 
 /* ============================================
@@ -1954,12 +2102,12 @@ body.sidebar-right .clips-list {
     margin-bottom: 0;
     padding: 20px;
     min-height: 120px;
-    background: rgba(20, 35, 60, 0.6) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: linear-gradient(145deg, rgba(22, 38, 62, 0.78) 0%, rgba(14, 26, 48, 0.72) 100%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.09) !important;
     border-radius: 14px !important;
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
@@ -2061,14 +2209,15 @@ body.sidebar-right .clips-list {
 
 .clip-card:hover {
     transform: translateY(-3px);
-    border-color: rgba(0, 245, 160, 0.35);
+    border-color: rgba(0, 245, 160, 0.4);
     box-shadow:
-        0 14px 34px rgba(0, 0, 0, 0.55),
-        0 0 18px rgba(0, 217, 255, 0.15);
+        0 16px 40px rgba(0, 0, 0, 0.5),
+        0 0 24px rgba(0, 217, 255, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 /* ============================================
-   Global vintage blue background (final override)
+   Sfondo: base + Nebula / Macchie #715C66 integrate (visibili attraverso pannelli)
    ============================================ */
 html,
 body,
@@ -2076,9 +2225,18 @@ body.center-body,
 body.sidebar-body,
 body.workspace-body {
     background:
-        radial-gradient(1020px 460px at 56% 8%, rgba(46, 74, 126, 0.20) 0%, rgba(18, 34, 62, 0.12) 35%, rgba(7, 14, 27, 0) 68%),
-        radial-gradient(820px 560px at 16% 84%, rgba(16, 49, 95, 0.14) 0%, rgba(8, 20, 41, 0.10) 42%, rgba(4, 10, 20, 0) 78%),
-        linear-gradient(180deg, #060f1f 0%, #050b18 45%, #030710 100%) !important;
+        /* Macchie luminose #715C66 - spot distinti, non sfumati */
+        radial-gradient(circle 12% at 15% 20%, rgba(113, 92, 102, 0.55) 0%, rgba(113, 92, 102, 0.2) 40%, transparent 70%),
+        radial-gradient(circle 10% at 85% 15%, rgba(118, 95, 106, 0.5) 0%, transparent 55%),
+        radial-gradient(circle 14% at 75% 75%, rgba(113, 92, 102, 0.48) 0%, rgba(100, 80, 90, 0.15) 50%, transparent 70%),
+        radial-gradient(circle 11% at 25% 70%, rgba(105, 86, 96, 0.52) 0%, transparent 58%),
+        radial-gradient(circle 9% at 55% 35%, rgba(113, 92, 102, 0.45) 0%, transparent 50%),
+        radial-gradient(circle 13% at 40% 50%, rgba(120, 98, 108, 0.4) 0%, transparent 55%),
+        radial-gradient(circle 10% at 90% 55%, rgba(108, 88, 98, 0.5) 0%, transparent 52%),
+        radial-gradient(circle 8% at 8% 85%, rgba(113, 92, 102, 0.42) 0%, transparent 45%),
+        radial-gradient(circle 11% at 65% 18%, rgba(118, 95, 106, 0.38) 0%, transparent 50%),
+        /* Base blu-grigio */
+        radial-gradient(ellipse 85% 85% at 50% 50%, #1e2636 0%, #18202e 25%, #121a26 45%, #0e141c 65%, #0a0e14 85%, #080c10 100%) !important;
 }
 
 body::before {
@@ -2087,12 +2245,13 @@ body::before {
     inset: 0;
     pointer-events: none;
     z-index: 0;
-    opacity: 0.045;
     background-image:
-        radial-gradient(rgba(255, 255, 255, 0.14) 0.45px, transparent 0.45px),
-        radial-gradient(rgba(255, 255, 255, 0.07) 0.45px, transparent 0.45px);
-    background-size: 3px 3px, 5px 5px;
-    background-position: 0 0, 1px 1px;
+        radial-gradient(rgba(255,255,255,0.03) 0.5px, transparent 0.5px),
+        radial-gradient(rgba(255,255,255,0.015) 0.5px, transparent 0.5px);
+    background-size: 4px 4px, 6px 6px;
+    background-position: 0 0, 2px 2px;
+    opacity: 0.4;
+    mix-blend-mode: overlay;
 }
 
 body::after {
@@ -2101,15 +2260,13 @@ body::after {
     inset: 0;
     pointer-events: none;
     z-index: 0;
-    background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 46%, rgba(0, 0, 0, 0.32) 72%, rgba(0, 0, 0, 0.58) 100%);
-}
-
-/* ============================================
-   Workspace: remove only hard divider lines
-   ============================================ */
-body.sidebar-body,
-body.center-body {
-    background: transparent !important;
+    background: radial-gradient(
+        ellipse 90% 90% at 50% 50%,
+        transparent 50%,
+        rgba(0, 0, 0, 0.15) 75%,
+        rgba(0, 0, 0, 0.4) 100%
+    );
+    opacity: 0.7;
 }
 
 /* Remove top edge divider highlights that look like cut lines */
@@ -2146,56 +2303,10 @@ body.sidebar-body,
 body.workspace-body {
     margin: 0;
     min-height: 100vh;
+    height: 100%;
     color: #eaf2fb;
-
-    background:
-        radial-gradient(circle at 20% 10%, rgba(0,255,170,0.60), transparent 70%),
-        radial-gradient(circle at 85% 85%, rgba(0,200,255,0.65), transparent 75%),
-        radial-gradient(circle at center, rgba(255,255,255,0.35), transparent 80%),
-        linear-gradient(
-            180deg,
-            #0b1422 0%,
-            #0c1628 40%,
-            #070e1a 100%
-        );
-
     position: relative;
     overflow-x: hidden;
-}
-
-body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-
-    background-image:
-        repeating-linear-gradient(
-            0deg,
-            rgba(255,255,255,0.02) 0px,
-            rgba(255,255,255,0.02) 1px,
-            transparent 1px,
-            transparent 3px
-        );
-
-    opacity: 0.35;
-    mix-blend-mode: overlay;
-}
-
-body::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-
-    background:
-        radial-gradient(
-            circle at center,
-            transparent 40%,
-            rgba(0,0,0,0.75) 100%
-        );
-
-    opacity: 0.65;
 }
 
 /* ============================================
@@ -2206,15 +2317,39 @@ body.center-body {
     overflow: hidden !important;
 }
 
-body.center-body > .controls-container,
 body.center-body .progress-section,
 body.center-body .progress-section .timeline-track {
     overflow: hidden !important;
 }
 
-body.center-body::-webkit-scrollbar,
-body.center-body .controls-container::-webkit-scrollbar {
+/* Consenti scroll verticale al pannello controlli così i pulsanti "Analisi step-by-step" restano raggiungibili */
+body.center-body > .controls-container {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+body.center-body::-webkit-scrollbar {
     display: none !important;
+}
+
+body.center-body .controls-container::-webkit-scrollbar {
+    width: 6px;
+    height: 0;
+}
+
+body.center-body .controls-container::-webkit-scrollbar-track {
+    background: rgba(255,255,255,0.04);
+    border-radius: 3px;
+}
+
+body.center-body .controls-container::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.15);
+    border-radius: 3px;
+}
+
+body.center-body .controls-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.25);
 }
 
 /* Play/Pausa toggle: larghezza fissa in entrambi gli stati */
@@ -2263,7 +2398,7 @@ body.sidebar-right .sidebar-container {
 }
 
 /* ============================================
-   Keep body multilayer visible through main wrappers
+   Keep body multilayer visible through main wrappers (nebula visibile)
    ============================================ */
 body.sidebar-body > .sidebar-container,
 body.sidebar-body > .sidebar-container > .sidebar-section,
@@ -2272,7 +2407,10 @@ body.center-body > .controls-container > .progress-section,
 body.center-body > .controls-container > .timeline-events-section,
 body.center-body > .controls-container > .draw-tools-section,
 body.sidebar-right .clips-section,
-body.sidebar-left .event-list-section {
+body.sidebar-right .clips-list,
+body.sidebar-body .clips-container,
+body.sidebar-left .event-list-section,
+body.center-body .ctrl-row {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
@@ -2280,9 +2418,8 @@ body.sidebar-left .event-list-section {
     backdrop-filter: none !important;
 }
 
-/* Ensure html/root wrappers don't cover body multilayer background */
+/* html mantiene lo sfondo profondo; height per layout */
 html {
-    background: transparent !important;
     height: 100%;
 }
 
@@ -2299,6 +2436,14 @@ body.workspace-body {
 .workspace-shell,
 .workspace-body,
 .workspace-main-layout {
+    background: transparent !important;
+}
+
+/* Soluzione D: pannello unificato lascia visibile lo sfondo Qt */
+body.workspace-unified,
+body.workspace-unified .unified-panel,
+body.workspace-unified .sidebar-container,
+body.workspace-unified .controls-container {
     background: transparent !important;
 }
 

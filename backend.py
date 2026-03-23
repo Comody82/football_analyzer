@@ -31,7 +31,9 @@ class BackendBridge(QObject):
     eventCreated = pyqtSignal(str)   # id evento appena creato (per selezione card)
     eventTypesUpdated = pyqtSignal(str)  # JSON dei tipi evento (per pulsanti)
     timeUpdated = pyqtSignal(str)  # JSON {current, duration} per barra progresso
-    
+    zoomUpdated = pyqtSignal(float)  # livello zoom (1.0–5.0)
+    zoomZoneFactorUpdated = pyqtSignal(float)  # fattore zoom zona (1.0–5.0)
+
     def __init__(self, video_player=None, drawing_overlay=None, parent_window=None):
         super().__init__()
         self.video_player = video_player
@@ -51,7 +53,8 @@ class BackendBridge(QObject):
         self.current_project_id = None
         self._download_thread = None
         self._download_worker = None
-        
+        self._automatic_events = []  # Fase 8: eventi da event engine (pass, recovery, shot, pressing)
+
         # Carica tipi evento di default
         self.event_manager.load_default_types(DEFAULT_EVENT_TYPES)
         
@@ -60,6 +63,12 @@ class BackendBridge(QObject):
             self.video_player.positionChanged.connect(self._emit_time_update)
             self.video_player.durationChanged.connect(self._emit_time_update)
             self.video_player.playbackStateChanged.connect(self.playbackStateChanged.emit)
+            if hasattr(self.video_player, 'zoomLevelChanged'):
+                self.video_player.zoomLevelChanged.connect(self.zoomUpdated.emit)
+            if hasattr(self.video_player, 'zoomZoneFactorChanged'):
+                self.video_player.zoomZoneFactorChanged.connect(self.zoomZoneFactorUpdated.emit)
+            if self.drawing_overlay and hasattr(self.drawing_overlay, 'zoomZoneCleared'):
+                self.drawing_overlay.zoomZoneCleared.connect(lambda: self.zoomZoneFactorUpdated.emit(1.0))
     
     # ==========================================
     # Slots Python chiamati da JavaScript
@@ -586,9 +595,18 @@ class BackendBridge(QObject):
         """Ritorna True se il player è in riproduzione."""
         return bool(self.video_player and self.video_player.state() == 1)
     
+    @pyqtSlot(str)
+    def setAutomaticEvents(self, events_json):
+        """Imposta eventi automatici (event engine) per timeline. events_json: array JSON."""
+        try:
+            self._automatic_events = json.loads(events_json) if isinstance(events_json, str) else (events_json or [])
+        except Exception:
+            self._automatic_events = []
+        self.eventsUpdated.emit(self.getEvents())
+
     @pyqtSlot(result=str)
     def getEvents(self):
-        """Restituisce tutti gli eventi in formato JSON"""
+        """Restituisce tutti gli eventi (manuali + automatici) in formato JSON per timeline."""
         events_data = []
         for evt in self.event_manager.get_events():
             events_data.append({
@@ -597,6 +615,16 @@ class BackendBridge(QObject):
                 'timestamp_ms': evt.timestamp_ms,
                 'description': evt.description,
                 'label': evt.label
+            })
+        labels = {"pass": "Passaggio", "recovery": "Recupero", "shot": "Tiro", "pressing": "Pressing"}
+        for i, e in enumerate(self._automatic_events):
+            t = e.get("type", "event")
+            events_data.append({
+                'id': f"auto_{i}",
+                'event_type_id': f"auto_{t}",
+                'timestamp_ms': e.get("timestamp_ms", 0),
+                'description': labels.get(t, t),
+                'label': labels.get(t, t)
             })
         return json.dumps(events_data)
     
@@ -615,56 +643,40 @@ class BackendBridge(QObject):
                 self.parent_window._seek_target_ms = None
             self.statusChanged.emit(f"Seek to {timestamp_ms}ms")
     
+    def _get_all_events_sorted(self):
+        """Lista unificata (manuali + automatici) ordinata per timestamp_ms, ogni elemento ha .timestamp_ms e .id."""
+        class _E:
+            __slots__ = ("timestamp_ms", "id")
+            def __init__(self, ts, id_):
+                self.timestamp_ms = ts
+                self.id = id_
+        out = [_E(evt.timestamp_ms, evt.id) for evt in self.event_manager.get_events()]
+        for i, e in enumerate(self._automatic_events):
+            out.append(_E(e.get("timestamp_ms", 0), f"auto_{i}"))
+        return sorted(out, key=lambda x: x.timestamp_ms)
+
     @pyqtSlot()
     def goToPrevEvent(self):
-        """Vai all'evento precedente"""
+        """Vai all'evento precedente (manuali + automatici)."""
         if not self.video_player:
             return
         self.exit_clip_playback_mode()
         pos = self.video_player.position()
-        events = [e for e in self.event_manager.get_events() if e.timestamp_ms < pos]
+        events = [e for e in self._get_all_events_sorted() if e.timestamp_ms < pos]
         if not events:
             return
         prev_evt = max(events, key=lambda e: e.timestamp_ms)
         self.video_player.setPosition(prev_evt.timestamp_ms)
         self.video_player.pause()
-    
+
     @pyqtSlot()
     def goToNextEvent(self):
-        """Vai all'evento successivo"""
+        """Vai all'evento successivo (manuali + automatici)."""
         if not self.video_player:
             return
         self.exit_clip_playback_mode()
         pos = self.video_player.position()
-        events = [e for e in self.event_manager.get_events() if e.timestamp_ms > pos]
-        if not events:
-            return
-        next_evt = min(events, key=lambda e: e.timestamp_ms)
-        self.video_player.setPosition(next_evt.timestamp_ms)
-        self.video_player.pause()
-    
-    @pyqtSlot()
-    def goToPrevEvent(self):
-        """Vai all'evento precedente"""
-        if not self.video_player:
-            return
-        self.exit_clip_playback_mode()
-        pos = self.video_player.position()
-        events = [e for e in self.event_manager.get_events() if e.timestamp_ms < pos]
-        if not events:
-            return
-        prev_evt = max(events, key=lambda e: e.timestamp_ms)
-        self.video_player.setPosition(prev_evt.timestamp_ms)
-        self.video_player.pause()
-    
-    @pyqtSlot()
-    def goToNextEvent(self):
-        """Vai all'evento successivo"""
-        if not self.video_player:
-            return
-        self.exit_clip_playback_mode()
-        pos = self.video_player.position()
-        events = [e for e in self.event_manager.get_events() if e.timestamp_ms > pos]
+        events = [e for e in self._get_all_events_sorted() if e.timestamp_ms > pos]
         if not events:
             return
         next_evt = min(events, key=lambda e: e.timestamp_ms)
@@ -699,10 +711,20 @@ class BackendBridge(QObject):
             "curved_arrow": DrawTool.CURVED_ARROW, "parabola_arrow": DrawTool.PARABOLA_ARROW,
             "rect": DrawTool.RECTANGLE, "rectangle": DrawTool.RECTANGLE,
             "polygon": DrawTool.POLYGON,
-            "text": DrawTool.TEXT, "pencil": DrawTool.PENCIL, "none": DrawTool.NONE,
+            "text": DrawTool.TEXT, "pencil": DrawTool.PENCIL, "zoom": DrawTool.ZOOM,
+            "zoom_zone": DrawTool.ZOOM_ZONE, "none": DrawTool.NONE,
         }
         tool = name_map.get((tool_name or "").lower(), DrawTool.NONE)
         self.drawing_overlay.setTool(tool)
+        if tool == DrawTool.ZOOM:
+            if self.drawing_overlay and hasattr(self.drawing_overlay, 'clearZoomZone'):
+                self.drawing_overlay.clearZoomZone()
+        elif tool == DrawTool.ZOOM_ZONE:
+            if self.video_player and hasattr(self.video_player, 'setZoomLevel'):
+                self.video_player.setZoomLevel(1.0)
+                self.zoomUpdated.emit(1.0)
+            if self.video_player and hasattr(self.video_player, 'getZoomZoneFactor'):
+                self.zoomZoneFactorUpdated.emit(self.video_player.getZoomZoneFactor())
         if self.parent_window and hasattr(self.parent_window, "_on_draw_tool_changed"):
             self.parent_window._on_draw_tool_changed(tool)
 
@@ -712,6 +734,12 @@ class BackendBridge(QObject):
         if self.drawing_overlay:
             self.drawing_overlay.clearDrawings()
             self.statusChanged.emit("Disegni cancellati")
+
+    @pyqtSlot()
+    def clearZoomZone(self):
+        """Rimuove la zona zoom."""
+        if self.drawing_overlay and hasattr(self.drawing_overlay, 'clearZoomZone'):
+            self.drawing_overlay.clearZoomZone()
 
     @pyqtSlot()
     def showShortcutsHelp(self):
@@ -737,6 +765,118 @@ class BackendBridge(QObject):
         """Apre lo studio highlights nel workspace."""
         if self.parent_window and hasattr(self.parent_window, "show_highlights_studio"):
             self.parent_window.show_highlights_studio()
+
+    @pyqtSlot()
+    def openFieldCalibration(self):
+        """Apre il dialog di calibrazione campo per analisi automatica."""
+        if self.parent_window and hasattr(self.parent_window, "show_field_calibration"):
+            self.parent_window.show_field_calibration()
+
+    @pyqtSlot()
+    def openVideoPreprocessing(self):
+        """Apre il dialog di preprocessing video per analisi automatica."""
+        if self.parent_window and hasattr(self.parent_window, "show_video_preprocessing"):
+            self.parent_window.show_video_preprocessing()
+
+    @pyqtSlot()
+    def openPlayerDetection(self):
+        """Apre il dialog di player detection per analisi automatica."""
+        if self.parent_window and hasattr(self.parent_window, "show_player_detection"):
+            self.parent_window.show_player_detection()
+
+    @pyqtSlot()
+    def openPlayerTracking(self):
+        """Apre il dialog di player tracking per analisi automatica."""
+        if self.parent_window and hasattr(self.parent_window, "show_player_tracking"):
+            self.parent_window.show_player_tracking()
+
+    @pyqtSlot()
+    def openBallDetection(self):
+        """Apre il dialog di ball detection per analisi automatica."""
+        if self.parent_window and hasattr(self.parent_window, "show_ball_detection"):
+            self.parent_window.show_ball_detection()
+
+    @pyqtSlot()
+    def openFullAnalysis(self):
+        """Apre dialog opzioni e avvia analisi automatica completa (preprocess + player + ball + clustering)."""
+        if self.parent_window and hasattr(self.parent_window, "show_full_analysis"):
+            self.parent_window.show_full_analysis()
+
+    @pyqtSlot()
+    def openReclusterTeams(self):
+        """Esegue solo il clustering globale squadre sui dati già presenti."""
+        if self.parent_window and hasattr(self.parent_window, "show_recluster_teams"):
+            self.parent_window.show_recluster_teams()
+
+    @pyqtSlot()
+    def loadTrackingOverlay(self):
+        """Ricarica e applica i dati di tracking (ball/player) dal progetto."""
+        if self.parent_window and hasattr(self.parent_window, "_load_tracking_overlay"):
+            self.parent_window._load_tracking_overlay()
+
+    @pyqtSlot(result=bool)
+    def toggleTrackingOverlay(self):
+        """Attiva/disattiva overlay tracking sul video. Ritorna True se ora visibile."""
+        if not self.video_player or not hasattr(self.video_player, "setShowTracking"):
+            QMessageBox.warning(
+                self.parent_window or QApplication.activeWindow(),
+                "Tracking",
+                "Nessun video caricato.",
+            )
+            return False
+        # Ricarica sempre i dati prima di mostrare
+        self.loadTrackingOverlay()
+        has_ball = bool(getattr(self.video_player, "_ball_tracks", None))
+        has_player = bool(getattr(self.video_player, "_player_tracks", None))
+        if not has_ball and not has_player:
+            QMessageBox.information(
+                self.parent_window or QApplication.activeWindow(),
+                "Mostra tracking",
+                "Nessun dato di tracking trovato.\n\n"
+                "Esegui prima Ball detection e/o Player detection + Player tracking "
+                "dal progetto aperto, poi riprova.",
+            )
+            return False
+
+        def _has_any_detection(tracks, key_frame="frames", key_det="detections", key_single="detection"):
+            if not tracks:
+                return False
+            frames = tracks.get(key_frame, [])
+            for f in frames:
+                if key_single and key_single in f:
+                    if f.get(key_single):
+                        return True
+                if key_det and f.get(key_det):
+                    return True
+            return False
+
+        has_ball_det = _has_any_detection(getattr(self.video_player, "_ball_tracks", None), key_det=None, key_single="detection")
+        has_player_det = _has_any_detection(getattr(self.video_player, "_player_tracks", None), key_single=None, key_det="detections")
+        if not has_ball_det and not has_player_det:
+            QMessageBox.information(
+                self.parent_window or QApplication.activeWindow(),
+                "Mostra tracking",
+                "L'analisi non ha rilevato giocatori né palla in nessun frame.\n\n"
+                "Possibili cause:\n"
+                "• Inquadratura molto larga o angolo sfavorevole\n"
+                "• Qualità/resoluzione bassa\n"
+                "• Prova con un altro video dove i giocatori sono ben visibili\n\n"
+                "L'overlay è attivo ma non ci sono elementi da mostrare.",
+            )
+
+        new_state = not self.video_player.getShowTracking()
+        self.video_player.setShowTracking(new_state)
+        if self.video_player.duration() > 0:
+            self.video_player.setPosition(self.video_player.position())  # forza redraw
+        self.statusChanged.emit("Tracking " + ("attivato" if new_state else "disattivato"))
+        return new_state
+
+    @pyqtSlot(result=bool)
+    def getTrackingOverlayVisible(self):
+        """Ritorna True se l'overlay tracking è visibile."""
+        if not self.video_player or not hasattr(self.video_player, "getShowTracking"):
+            return False
+        return self.video_player.getShowTracking()
 
     @pyqtSlot()
     def windowMinimize(self):
@@ -778,6 +918,24 @@ class BackendBridge(QObject):
         """Termina drag finestra."""
         if self.parent_window and hasattr(self.parent_window, "_end_window_drag"):
             self.parent_window._end_window_drag()
+
+    @pyqtSlot(result=float)
+    def getZoomLevel(self):
+        """Livello zoom corrente (1.0–5.0)."""
+        if self.video_player and hasattr(self.video_player, 'zoomLevel'):
+            return self.video_player.zoomLevel()
+        return 1.0
+
+    @pyqtSlot(float)
+    def setZoomFromSlider(self, level: float):
+        """Imposta zoom da barra (zoom centrato sul video)."""
+        if not self.video_player or not hasattr(self.video_player, 'setZoomAt'):
+            return
+        level = max(1.0, min(5.0, float(level)))
+        vp = self.video_player._graphics_view.viewport()
+        cx = vp.width() // 2
+        cy = vp.height() // 2
+        self.video_player.setZoomAt(level, cx, cy)
 
     @pyqtSlot(result=int)
     def getVideoPosition(self):
@@ -977,11 +1135,15 @@ class BackendBridge(QObject):
         ]
         return self._run_ffmpeg(cmd)
 
-    def generate_highlights_package(self, selected_clip_ids, image_items):
+    def generate_highlights_package_from_sequence(
+        self, sequence, output_path=None, progress_callback=None
+    ):
         """
-        Genera highlights finale da clip selezionate + immagini opzionali.
-        image_items: [{"path": "...", "duration_sec": 3}, ...]
-        Ritorna tuple (ok: bool, result: str) dove result e' path output o messaggio errore.
+        Genera highlights dalla sequenza ordinata.
+        sequence: [{"type":"clip","clip_id":"..."}, {"type":"image","path":"...","duration_sec":3}, ...]
+        output_path: path dove salvare (opzionale). Se None, usa cartella Highlights.
+        progress_callback: fn(percent: int, status: str) opzionale.
+        Ritorna tuple (ok: bool, result: str).
         """
         if not self.clip_manager.is_available():
             return False, "FFmpeg non trovato. Installa FFmpeg per generare highlights."
@@ -990,20 +1152,27 @@ class BackendBridge(QObject):
         if not source_video or not Path(source_video).exists():
             return False, "Video sorgente non disponibile."
 
-        selected_clip_ids = list(selected_clip_ids or [])
-        selected_set = set(selected_clip_ids)
-        ordered_clips = [c for c in self.clips if c.get("id") in selected_set]
+        sequence = list(sequence or [])
+        if not sequence:
+            return False, "Sequenza vuota."
 
-        image_items = list(image_items or [])
-        valid_images = []
-        for it in image_items:
-            p = str((it or {}).get("path", "")).strip()
-            d = int((it or {}).get("duration_sec", 3) or 3)
-            if p and Path(p).exists():
-                valid_images.append({"path": p, "duration_sec": max(1, d)})
+        def _report(pct, msg):
+            if progress_callback:
+                progress_callback(pct, msg)
 
-        if not ordered_clips and not valid_images:
-            return False, "Nessun contenuto selezionato per gli highlights."
+        clips_by_id = {c.get("id"): c for c in self.clips if c.get("id")}
+        valid_items = []
+        for it in sequence:
+            if (it or {}).get("type") == "clip":
+                if clips_by_id.get((it or {}).get("clip_id")):
+                    valid_items.append(it)
+            elif (it or {}).get("type") == "image":
+                p = str((it or {}).get("path", "")).strip()
+                if p and Path(p).exists():
+                    valid_items.append(it)
+        total_segments = len(valid_items)
+        if total_segments == 0:
+            return False, "Nessun contenuto valido nella sequenza."
 
         highlights_dir = Path(HIGHLIGHTS_FOLDER)
         highlights_dir.mkdir(parents=True, exist_ok=True)
@@ -1013,31 +1182,46 @@ class BackendBridge(QObject):
             segment_paths = []
             seg_idx = 0
 
-            for clip in ordered_clips:
-                out_seg = tmp_dir / f"seg_clip_{seg_idx:03d}.mp4"
-                seg_idx += 1
-                if not self._render_clip_segment(source_video, int(clip["start"]), int(clip["end"]), out_seg):
-                    return False, "Errore durante rendering clip highlights."
-                segment_paths.append(out_seg)
-
-            for img in valid_images:
-                out_seg = tmp_dir / f"seg_img_{seg_idx:03d}.mp4"
-                seg_idx += 1
-                if not self._render_image_segment(img["path"], img["duration_sec"], out_seg):
-                    return False, "Errore durante rendering immagini highlights."
-                segment_paths.append(out_seg)
+            for idx, item in enumerate(sequence):
+                it = item or {}
+                if it.get("type") == "clip":
+                    clip = clips_by_id.get(it.get("clip_id"))
+                    if not clip:
+                        continue
+                    _report(int(90 * seg_idx / total_segments), f"Rendering clip {seg_idx + 1}/{total_segments}...")
+                    out_seg = tmp_dir / f"seg_clip_{seg_idx:03d}.mp4"
+                    seg_idx += 1
+                    if not self._render_clip_segment(source_video, int(clip["start"]), int(clip["end"]), out_seg):
+                        return False, "Errore durante rendering clip highlights."
+                    segment_paths.append(out_seg)
+                elif it.get("type") == "image":
+                    p = str(it.get("path", "")).strip()
+                    d = max(1, int(it.get("duration_sec", 3) or 3))
+                    if not p or not Path(p).exists():
+                        continue
+                    _report(int(90 * seg_idx / total_segments), f"Rendering immagine {seg_idx + 1}/{total_segments}...")
+                    out_seg = tmp_dir / f"seg_img_{seg_idx:03d}.mp4"
+                    seg_idx += 1
+                    if not self._render_image_segment(p, d, out_seg):
+                        return False, "Errore durante rendering immagini highlights."
+                    segment_paths.append(out_seg)
 
             if not segment_paths:
                 return False, "Nessun segmento generato."
 
+            _report(92, "Assemblaggio finale...")
             list_file = tmp_dir / "segments.txt"
             with open(list_file, "w", encoding="utf-8") as f:
                 for seg in segment_paths:
                     seg_posix = str(seg.absolute()).replace("\\", "/")
                     f.write(f"file '{seg_posix}'\n")
 
-            output_name = f"highlights_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-            output_path = highlights_dir / output_name
+            if output_path:
+                out_path = Path(output_path)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                output_name = f"highlights_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+                out_path = highlights_dir / output_name
             cmd_concat = [
                 "ffmpeg", "-y",
                 "-f", "concat",
@@ -1050,14 +1234,15 @@ class BackendBridge(QObject):
                 "-ar", "44100",
                 "-ac", "2",
                 "-movflags", "+faststart",
-                str(output_path),
+                str(out_path),
             ]
             if not self._run_ffmpeg(cmd_concat):
                 return False, "Errore assemblaggio highlights finale."
 
-            if not output_path.exists():
+            _report(100, "Completato!")
+            if not out_path.exists():
                 return False, "File highlights non creato."
-            return True, str(output_path.absolute())
+            return True, str(out_path.absolute())
         finally:
             try:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -1136,6 +1321,29 @@ class BackendBridge(QObject):
         except Exception as ex:
             logging.warning(f"Errore salvataggio progetto: {ex}")
             return False
+
+    @pyqtSlot(result=int)
+    def getCurrentPositionMs(self):
+        if self.video_player:
+            return int(getattr(self.video_player, '_position_ms', 0) or 0)
+        return 0
+
+    @pyqtSlot(result=str)
+    def getPlayerTracksJson(self):
+        if self.video_player:
+            tracks = getattr(self.video_player, '_player_tracks', None)
+            if tracks:
+                return json.dumps(tracks)
+        return '{}'
+
+    @pyqtSlot(result=bool)
+    def toggleTacticalBoard(self):
+        if self.parent_window and hasattr(self.parent_window, 'web_view_tactical'):
+            tb = self.parent_window.web_view_tactical
+            visible = not tb.isVisible()
+            tb.setVisible(visible)
+            return visible
+        return False
 
 
 class _VideoDownloadWorker(QObject):

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workspace Unificato</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="workspace_unified.css">
+</head>
+<body class="workspace-unified sidebar-body">
+    <div class="workspace-three-cols">
+        <!-- Colonna Eventi -->
+        <div class="workspace-col workspace-col-eventi">
+            <div class="sidebar-container">
+                <div class="sidebar-section">
+                    <h2 class="section-title">EVENTI</h2>
+                    <button class="btn-secondary btn-crea-evento" id="btnCreaEvento">Crea Evento</button>
+                    <div class="event-buttons" id="eventButtons"></div>
+                    <button class="btn-secondary btn-modifica-pulsanti" id="btnModificaPulsanti">Modifica Pulsanti Evento</button>
+                    <div class="event-list-section">
+                        <label class="event-list-label">Lista eventi:</label>
+                        <div class="event-list-container" id="eventsList"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Colonna centrale: slot video (Qt overlay) + controlli -->
+        <div class="workspace-col workspace-col-center">
+            <div id="video-slot" class="video-slot"></div>
+            <div class="controls-container">
+                <div class="progress-section">
+                    <div class="timeline-track" id="mainTimelineTrack">
+                        <div class="timeline-progress" id="timelineProgress"></div>
+                        <div class="timeline-handle" id="timelineHandle"></div>
+                    </div>
+                </div>
+                <div class="ctrl-row">
+                    <button class="btn-control" id="btnRestart" title="Restart">↺ Restart</button>
+                    <button class="btn-control" id="btnSpeed" title="Velocità">1x</button>
+                    <button class="btn-control" id="btnFrame" title="Frame">▶|</button>
+                    <button class="btn-control btn-play" id="btnPlay">▶ Play</button>
+                    <button class="btn-control" id="btnRewind" title="Indietro Ns">-5s</button>
+                    <button class="btn-control" id="btnForward" title="Avanti Ns">+5s</button>
+                    <button class="btn-control" id="btnPrevEvent" title="Evento precedente">⏮</button>
+                    <button class="btn-control" id="btnNextEvent" title="Evento successivo">⏭</button>
+                    <div class="time-display-inline">
+                        <span id="currentTime">00:00</span>
+                        <span> / </span>
+                        <span id="totalTime">00:00</span>
+                    </div>
+                    <button class="btn-control" id="btnShortcuts" title="Scorciatoie (F1)">⌨ ?</button>
+                </div>
+                <div class="timeline-events-section">
+                    <label class="timeline-label">Timeline eventi:</label>
+                    <div class="timeline-canvas-wrapper">
+                        <canvas id="timelineCanvas" class="timeline-canvas"></canvas>
+                    </div>
+                </div>
+                <div class="draw-tools-section">
+                    <label class="draw-tools-label">Strumenti disegno</label>
+                    <div class="draw-tools-row">
+                        <button class="tool-btn" id="toolCircle" title="Cerchio">○</button>
+                        <button class="tool-btn" id="toolArrow" title="Freccia">→</button>
+                        <button class="tool-btn" id="toolCurvedArrow" title="Freccia curva">↷</button>
+                        <button class="tool-btn" id="toolParabola" title="Parabola">⌒</button>
+                        <button class="tool-btn" id="toolLine" title="Linea">—</button>
+                        <button class="tool-btn" id="toolRect" title="Rettangolo">□</button>
+                        <button class="tool-btn" id="toolPolygon" title="Poligono">⬠</button>
+                        <button class="tool-btn" id="toolText" title="Testo">T</button>
+                        <button class="tool-btn" id="toolPencil" title="Matita">✎</button>
+                        <button class="btn-control draw-action-btn" id="btnDrawColor" title="Colore / Spessore">Colore / Spessore</button>
+                        <button class="btn-control draw-action-btn" id="btnClearDrawings" title="Cancella disegni">Cancella disegni</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Colonna Clip -->
+        <div class="workspace-col workspace-col-clip">
+            <div class="sidebar-container">
+                <div class="sidebar-section">
+                    <div class="clips-section">
+                        <div class="clips-header">
+                            <h2>CREA CLIP</h2>
+                            <div class="clips-create-actions">
+                                <button class="btn-control" id="btnClipStart">Inizio</button>
+                                <button class="btn-control" id="btnClipEnd">Fine</button>
+                            </div>
+                        </div>
+                        <button class="export-btn" id="btnExport">
+                            <span class="icon">⤴</span>
+                            Genera Highlights
+                        </button>
+                        <div class="clips-list clips-container" id="clipsContainer"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script src="workspace_unified.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

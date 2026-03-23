@@ -1,0 +1,99 @@
+/* Workspace Unificato - Layout 3 colonne: Eventi | Video | Clip
+   Design tokens allineati al tema Qt */
+
+:root {
+    --ws-accent: #17806a;
+    --ws-accent-start: #0f5d4d;
+    --ws-accent-end: #29b48d;
+    --ws-accent-hover-start: #137261;
+    --ws-accent-hover-end: #33c89f;
+    --ws-tab-bg: rgba(16, 30, 54, 0.76);
+    --ws-tab-border: rgba(116, 156, 220, 0.15);
+    --ws-text-primary: #e9f2ff;
+    --ws-text-secondary: #8b9bb8;
+    --ws-spacing: 12px;
+    --ws-radius: 8px;
+    --ws-col-eventi-w: 300px;
+    --ws-col-clip-w: 340px;
+}
+
+.workspace-unified {
+    background: transparent !important;
+    padding: 0 !important;
+    height: 100% !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Griglia 3 colonne: Eventi | Video+Controlli | Clip */
+.workspace-three-cols {
+    display: grid;
+    grid-template-columns: var(--ws-col-eventi-w) 1fr var(--ws-col-clip-w);
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+.workspace-col {
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.workspace-col-eventi {
+    width: var(--ws-col-eventi-w);
+    min-width: var(--ws-col-eventi-w);
+}
+
+.workspace-col-center {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.workspace-col-clip {
+    width: var(--ws-col-clip-w);
+    min-width: var(--ws-col-clip-w);
+}
+
+/* Slot dove Qt disegna il video (area vuota, overlay Qt sopra) */
+.video-slot {
+    flex: 1;
+    min-height: 280px;
+    background: rgba(11, 18, 32, 0.5);
+    border-radius: 12px;
+    margin: var(--ws-spacing);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.workspace-col-center .controls-container {
+    flex-shrink: 0;
+    padding: var(--ws-spacing);
+}
+
+.workspace-unified .sidebar-container {
+    padding: var(--ws-spacing);
+}
+
+.workspace-unified .sidebar-container,
+.workspace-unified .controls-container {
+    min-height: 0;
+}
+
+.workspace-col-eventi .sidebar-container,
+.workspace-col-clip .sidebar-container {
+    flex: 1;
+    overflow: auto;
+}
+
+.workspace-unified .export-btn,
+.workspace-unified .btn-secondary,
+.workspace-unified .btn-control {
+    font-size: 13px;
+    font-weight: 600;
+}
