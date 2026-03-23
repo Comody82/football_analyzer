@@ -4,6 +4,19 @@ Questo file documenta le decisioni di design e le preferenze dell'utente per il 
 
 ---
 
+## Workflow Sessioni Claude
+
+> **IMPORTANTE — leggere prima di chiudere ogni sessione**
+
+- Alla fine di ogni sessione (o quando una feature è funzionante), **committare e pushare su GitHub**.
+- Tutto ciò che non è su `main` (GitHub) può andare perso al cambio di sessione.
+- Comando rapido: dire "committa e pusha" e Claude lo fa prima di chiudere.
+- Verificare con `git status` che sia tutto pulito prima di chiudere.
+
+**Perché**: nella sessione gallant-bassi molte feature (heatmap, team links, toast, ecc.) erano state sviluppate ma non committate. Al termine della sessione il worktree è stato perso e tutto il lavoro ha dovuto essere recuperato nella sessione successiva.
+
+---
+
 ## UI / UX
 
 - **Lingua**: Tutta l'interfaccia è in italiano. Messaggi, label, bottoni, toast.
