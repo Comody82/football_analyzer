@@ -1488,6 +1488,36 @@ class BackendBridge(QObject):
                 "has_pressing": False,
             })
 
+    @pyqtSlot(result=str)
+    def getAiEvents(self):
+        """Restituisce gli eventi automatici (event engine) come JSON per events.html."""
+        labels = {"pass": "Passaggio", "recovery": "Recupero", "shot": "Tiro", "pressing": "Pressing"}
+        result = []
+        for i, e in enumerate(self._automatic_events):
+            t = e.get("type", "event")
+            result.append({
+                "id": f"auto_{i}",
+                "type": t,
+                "label": labels.get(t, t),
+                "timestamp_ms": e.get("timestamp_ms", 0),
+                "confidence": e.get("confidence", 0.0),
+            })
+        return json.dumps(result)
+
+    @pyqtSlot(result=float)
+    def getTrackingFps(self):
+        """Restituisce FPS dei player tracks (usato da tactical board e heatmap)."""
+        if self.video_player:
+            tracks = getattr(self.video_player, '_player_tracks', None)
+            if tracks:
+                return float(tracks.get("fps", 3.0))
+        return 3.0
+
+    @pyqtSlot(str, str)
+    def requestToast(self, message, toast_type="info"):
+        """Permette al JS di richiedere un toast Qt. toast_type: 'info'|'warn'|'error'."""
+        self.toastRequested.emit(message, toast_type)
+
 
 class _VideoDownloadWorker(QObject):
     finished = pyqtSignal(str)

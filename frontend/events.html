@@ -25,24 +25,106 @@
     body.sidebar-left .event-list-section, body.sidebar-left .event-list-container {
         background: transparent !important; backdrop-filter: none !important;
     }
+    .events-tab-bar {
+        display: flex; gap: 4px; margin-bottom: 8px;
+    }
+    .events-tab-btn {
+        flex: 1; padding: 5px 6px; font-size: 11px; border-radius: 5px; cursor: pointer;
+        background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+        color: rgba(255,255,255,0.55); transition: background 0.15s;
+    }
+    .events-tab-btn.active {
+        background: rgba(59,130,246,0.22); border-color: rgba(59,130,246,0.4);
+        color: #93c5fd;
+    }
+    .events-tab-panel { display: none; }
+    .events-tab-panel.active { display: block; }
+    .ai-events-list { display: flex; flex-direction: column; gap: 4px; }
+    .ai-event-item {
+        display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+        background: rgba(255,255,255,0.04); border-radius: 5px;
+        border: 1px solid rgba(255,255,255,0.08); cursor: pointer;
+        transition: background 0.12s;
+    }
+    .ai-event-item:hover { background: rgba(255,255,255,0.09); }
+    .ai-event-type {
+        font-size: 10px; padding: 1px 6px; border-radius: 3px;
+        background: rgba(59,130,246,0.25); color: #93c5fd; white-space: nowrap;
+    }
+    .ai-event-type.pressing { background: rgba(239,68,68,0.25); color: #fca5a5; }
+    .ai-event-type.shot { background: rgba(245,158,11,0.25); color: #fcd34d; }
+    .ai-event-type.recovery { background: rgba(16,185,129,0.25); color: #6ee7b7; }
+    .ai-event-time { font-size: 11px; color: rgba(255,255,255,0.7); font-family: monospace; }
+    .ai-no-data { font-size: 11px; color: rgba(255,255,255,0.35); text-align: center; padding: 20px 0; }
     </style>
 </head>
 <body class="sidebar-body sidebar-left">
     <div class="nebula-bg" aria-hidden="true"></div>
     <div class="sidebar-container">
         <div class="sidebar-section">
-            <h2 class="section-title">EVENTI</h2>
-            <button class="btn-secondary btn-crea-evento" id="btnCreaEvento">Crea Evento</button>
-            <div class="event-buttons" id="eventButtons"></div>
-            <button class="btn-secondary btn-modifica-pulsanti" id="btnModificaPulsanti">Modifica Pulsanti Evento</button>
-            <div class="event-list-section">
-                <label class="event-list-label">Lista eventi:</label>
-                <div class="event-list-container" id="eventsList"></div>
+            <div class="events-tab-bar">
+                <button class="events-tab-btn active" id="tabEventi" onclick="switchEventsTab('manual')">📋 Eventi</button>
+                <button class="events-tab-btn" id="tabAiEventi" onclick="switchEventsTab('ai')">🤖 AI</button>
+            </div>
+
+            <!-- Tab Manuali -->
+            <div class="events-tab-panel active" id="panelManual">
+                <button class="btn-secondary btn-crea-evento" id="btnCreaEvento">Crea Evento</button>
+                <div class="event-buttons" id="eventButtons"></div>
+                <button class="btn-secondary btn-modifica-pulsanti" id="btnModificaPulsanti">Modifica Pulsanti Evento</button>
+                <div class="event-list-section">
+                    <label class="event-list-label">Lista eventi:</label>
+                    <div class="event-list-container" id="eventsList"></div>
+                </div>
+            </div>
+
+            <!-- Tab AI -->
+            <div class="events-tab-panel" id="panelAi">
+                <div class="ai-events-list" id="aiEventsList">
+                    <div class="ai-no-data">Esegui l'analisi automatica<br>per vedere gli eventi AI.</div>
+                </div>
             </div>
         </div>
     </div>
 
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
     <script src="script.js"></script>
+    <script>
+    function switchEventsTab(tab) {
+        document.getElementById('tabEventi').classList.toggle('active', tab === 'manual');
+        document.getElementById('tabAiEventi').classList.toggle('active', tab === 'ai');
+        document.getElementById('panelManual').classList.toggle('active', tab === 'manual');
+        document.getElementById('panelAi').classList.toggle('active', tab === 'ai');
+        if (tab === 'ai') loadAiEvents();
+    }
+
+    function msToTime(ms) {
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        return String(m).padStart(2,'0') + ':' + String(s % 60).padStart(2,'0');
+    }
+
+    function loadAiEvents() {
+        const b = window.backendBridge;
+        if (!b || typeof b.getAiEvents !== 'function') return;
+        b.getAiEvents(function(json) {
+            try {
+                const events = JSON.parse(json);
+                const container = document.getElementById('aiEventsList');
+                if (!events || events.length === 0) {
+                    container.innerHTML = '<div class="ai-no-data">Nessun evento AI rilevato.<br>Esegui l\'analisi automatica.</div>';
+                    return;
+                }
+                events.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+                container.innerHTML = events.map(e => `
+                    <div class="ai-event-item" onclick="window.backendBridge && window.backendBridge.seekToTimestamp(${e.timestamp_ms})">
+                        <span class="ai-event-type ${e.type}">${e.label}</span>
+                        <span class="ai-event-time">${msToTime(e.timestamp_ms)}</span>
+                    </div>
+                `).join('');
+            } catch(err) {}
+        });
+    }
+    </script>
 </body>
 </html>
