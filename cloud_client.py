@@ -204,17 +204,30 @@ def run_poll_loop(
     on_event: Callable[[dict], None],
     interval_seconds: int = POLL_INTERVAL_DEFAULT,
     stop_check: Optional[Callable[[], bool]] = None,
+    max_elapsed_seconds: int = 600,  # auto-cancel dopo 10 minuti
 ) -> None:
     """
     Polling /status/{job_id} ogni interval_seconds.
     Invoca on_event con dizionario normalizzato:
       {job_id, status, progress, message, result_url, error}
-    Termina quando status è COMPLETED/FAILED o stop_check() è True.
+    Termina quando status è COMPLETED/FAILED, stop_check() è True,
+    oppure sono trascorsi max_elapsed_seconds (default 600s = 10 min).
     """
     TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
+    start_time = time.time()
 
     while True:
         if stop_check and stop_check():
+            return
+
+        elapsed = time.time() - start_time
+        if elapsed >= max_elapsed_seconds:
+            on_event({
+                "job_id": job_id,
+                "status": "TIMED_OUT",
+                "progress": 0,
+                "message": f"Timeout: analisi non completata entro {max_elapsed_seconds // 60} minuti. Job annullato automaticamente.",
+            })
             return
 
         st, err = get_status(job_id)
