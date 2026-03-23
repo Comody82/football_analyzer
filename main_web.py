@@ -3496,6 +3496,17 @@ class DashboardPage(QWidget):
                 stats['n_events'] = len(evts.get('events', evts if isinstance(evts, list) else []))
             else:
                 stats['n_events'] = 0
+            # Stato calibrazione
+            from analysis.config import get_calibration_path
+            cal_path = get_calibration_path(project_dir)
+            if cal_path.exists():
+                import json as _json2
+                with open(cal_path, 'r', encoding='utf-8') as f:
+                    cal_data = _json2.load(f)
+                stats['calibrated'] = True
+                stats['cal_source'] = cal_data.get('source', 'manual')
+            else:
+                stats['calibrated'] = False
             # Possesso da metrics
             metrics_path = Path(get_analysis_output_path(project_dir)) / 'metrics.json'
             if metrics_path.exists():
@@ -3568,6 +3579,18 @@ class DashboardPage(QWidget):
                 badge = QLabel("⏳ Non analizzato")
                 badge.setStyleSheet("font-size: 10px; color: #9eb0c8; background: rgba(158,176,200,0.08); border: 1px solid rgba(158,176,200,0.2); border-radius: 4px; padding: 1px 6px;")
             header_row.addWidget(badge, 0, Qt.AlignVCenter)
+            # Badge calibrazione
+            if qs.get('calibrated'):
+                cal_src = qs.get('cal_source', 'manual')
+                cal_icon = "🤖" if cal_src == "auto" else "📐"
+                cal_badge = QLabel(f"{cal_icon} Calibrato")
+                cal_badge.setStyleSheet("font-size: 10px; color: #60a5fa; background: rgba(96,165,250,0.10); border: 1px solid rgba(96,165,250,0.3); border-radius: 4px; padding: 1px 6px;")
+                cal_badge.setToolTip("Auto" if cal_src == "auto" else "Manuale")
+            else:
+                cal_badge = QLabel("⚠️ No calibrazione")
+                cal_badge.setStyleSheet("font-size: 10px; color: #f59e0b; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25); border-radius: 4px; padding: 1px 6px;")
+                cal_badge.setToolTip("Metriche spaziali non disponibili")
+            header_row.addWidget(cal_badge, 0, Qt.AlignVCenter)
 
             updated = QLabel(f"Ultima modifica {meta.updatedAt.replace('T', ' ').replace('Z', '')}")
             updated.setProperty("class", "projectUpdated")
