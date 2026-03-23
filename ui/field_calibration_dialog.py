@@ -205,6 +205,8 @@ class FieldCalibrationDialog(QDialog):
         self._registry = registry
         self._placed = []            # [{point_idx, x_norm, y_norm}]
         self._active_point_idx = None
+        self._frame_bgr = None       # frame BGR originale per auto-detection
+        self._current_mode = "manual"
 
         self.setWindowTitle("Calibrazione Campo")
         self.setMinimumSize(1050, 640)
@@ -241,6 +243,21 @@ class FieldCalibrationDialog(QDialog):
                 border-radius: 6px; color: #e8f4ff; padding: 5px 10px; font-size: 12px;
             }
             QFrame#saveSeparator { background: rgba(255,255,255,0.08); }
+            QPushButton#btnModeActive {
+                background: rgba(34,197,94,0.18); border: 1px solid #22c55e;
+                color: #86efac; font-weight: 700;
+            }
+            QPushButton#btnModeInactive {
+                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+                color: #6a8aaa; font-weight: 600;
+            }
+            QPushButton#btnModeInactive:hover { background: rgba(255,255,255,0.1); color: #c8d8ec; }
+            QPushButton#btnAutoDetect {
+                background: rgba(139,92,246,0.18); border: 1px solid #7c3aed;
+                color: #c4b5fd; font-weight: 700; font-size: 12px;
+            }
+            QPushButton#btnAutoDetect:hover { background: rgba(139,92,246,0.30); }
+            QPushButton#btnAutoDetect:disabled { background: rgba(139,92,246,0.06); color: #4a3a6a; }
         """)
         self._build_ui()
         self._load_frame()
@@ -280,6 +297,52 @@ class FieldCalibrationDialog(QDialog):
         self._diagram = FieldDiagramWidget()
         self._diagram.setFixedHeight(185)
         rv.addWidget(self._diagram)
+
+        # ── Selezione modalità: Manuale / Auto TV ─────────────────────────
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(6)
+        self._btn_mode_manual = QPushButton("✏️  Manuale")
+        self._btn_mode_manual.setObjectName("btnModeActive")
+        self._btn_mode_manual.setFixedHeight(28)
+        self._btn_mode_manual.clicked.connect(lambda: self._set_mode("manual"))
+        self._btn_mode_auto = QPushButton("🤖  Auto (Camera TV)")
+        self._btn_mode_auto.setObjectName("btnModeInactive")
+        self._btn_mode_auto.setFixedHeight(28)
+        self._btn_mode_auto.clicked.connect(lambda: self._set_mode("auto"))
+        mode_row.addWidget(self._btn_mode_manual)
+        mode_row.addWidget(self._btn_mode_auto)
+        rv.addLayout(mode_row)
+
+        # ── Pannello Auto TV (nascosto di default) ────────────────────────
+        self._auto_widget = QWidget()
+        aw = QVBoxLayout(self._auto_widget)
+        aw.setContentsMargins(0, 4, 0, 4)
+        aw.setSpacing(6)
+
+        lbl_auto_hint = QLabel(
+            "Il sistema rileva automaticamente le linee bianche del campo.\n"
+            "Funziona con camera wide fissa e camera TV broadcast (pan/tilt/zoom).")
+        lbl_auto_hint.setStyleSheet("color: #64748b; font-size: 10px;")
+        lbl_auto_hint.setWordWrap(True)
+        aw.addWidget(lbl_auto_hint)
+
+        self._btn_auto_detect = QPushButton("🔍  Rileva automaticamente")
+        self._btn_auto_detect.setObjectName("btnAutoDetect")
+        self._btn_auto_detect.clicked.connect(self._auto_detect)
+        aw.addWidget(self._btn_auto_detect)
+
+        self._lbl_auto_result = QLabel("")
+        self._lbl_auto_result.setWordWrap(True)
+        self._lbl_auto_result.setStyleSheet("font-size: 11px;")
+        aw.addWidget(self._lbl_auto_result)
+
+        lbl_auto_corr = QLabel("Dopo il rilevamento puoi correggere manualmente i punti.")
+        lbl_auto_corr.setStyleSheet("color: #4a6a8a; font-size: 10px;")
+        lbl_auto_corr.setWordWrap(True)
+        aw.addWidget(lbl_auto_corr)
+
+        self._auto_widget.setVisible(False)
+        rv.addWidget(self._auto_widget)
 
         rv.addWidget(QLabel("Punti calibrazione (clicca per selezionare):"))
         self._list_points = QListWidget()
@@ -355,6 +418,7 @@ class FieldCalibrationDialog(QDialog):
                 ret, frame = cap2.read()
                 cap2.release()
             if ret:
+                self._frame_bgr = frame.copy()   # salva per auto-detection
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb.shape
                 img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
@@ -363,6 +427,101 @@ class FieldCalibrationDialog(QDialog):
                 self._frame_widget.setText("Impossibile caricare il frame video.")
         except Exception as e:
             self._frame_widget.setText(f"Errore caricamento frame: {e}")
+
+    # ── Cambio modalità Manuale / Auto TV ──────────────────────────────────
+    def _set_mode(self, mode: str):
+        self._current_mode = mode
+        is_auto = (mode == "auto")
+
+        self._btn_mode_manual.setObjectName("btnModeActive" if not is_auto else "btnModeInactive")
+        self._btn_mode_auto.setObjectName("btnModeActive" if is_auto else "btnModeInactive")
+        # Forza aggiornamento stile
+        for btn in (self._btn_mode_manual, self._btn_mode_auto):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+        self._auto_widget.setVisible(is_auto)
+        self._lbl_auto_result.setText("")
+
+    # ── Auto-detection (Camera TV) ─────────────────────────────────────────
+    def _auto_detect(self):
+        """Esegue il rilevamento automatico delle linee del campo sul frame corrente."""
+        if self._frame_bgr is None:
+            self._lbl_auto_result.setText("⚠️ Nessun frame caricato.")
+            self._lbl_auto_result.setStyleSheet("color: #f59e0b; font-size: 11px;")
+            return
+
+        self._btn_auto_detect.setEnabled(False)
+        self._btn_auto_detect.setText("⏳  Rilevamento in corso…")
+
+        try:
+            from analysis.auto_field_detector import AutoFieldDetector
+            detector = AutoFieldDetector()
+            result = detector.detect(self._frame_bgr)
+        except Exception as exc:
+            self._lbl_auto_result.setText(f"❌ Errore: {exc}")
+            self._lbl_auto_result.setStyleSheet("color: #ef4444; font-size: 11px;")
+            self._btn_auto_detect.setEnabled(True)
+            self._btn_auto_detect.setText("🔍  Rileva automaticamente")
+            return
+
+        self._btn_auto_detect.setEnabled(True)
+        self._btn_auto_detect.setText("🔍  Rileva automaticamente")
+
+        if not result.is_valid:
+            msg = result.error_msg or "Rilevamento fallito."
+            self._lbl_auto_result.setText(
+                f"❌ {msg}\n\n"
+                "Suggerimenti:\n"
+                "• Assicurati che il campo sia ben visibile\n"
+                "• Usa la modalità Manuale se l'angolazione è estrema")
+            self._lbl_auto_result.setStyleSheet("color: #ef4444; font-size: 11px;")
+            return
+
+        # Successo: popola _placed con i 4 angoli rilevati
+        fh, fw = self._frame_bgr.shape[:2]
+        # Indici in FIELD_POINTS: TL=0, TR=1, BR=2, BL=3
+        corner_indices = [0, 1, 2, 3]
+
+        self._placed.clear()
+        self._frame_widget.clear_points()
+        self._diagram.reset()
+
+        for seq, (pixel_pt, field_pt, pt_idx) in enumerate(
+                zip(result.pixel_points, result.field_points, corner_indices), start=1):
+            x_norm = pixel_pt[0] / fw
+            y_norm = pixel_pt[1] / fh
+            self._placed.append({'point_idx': pt_idx, 'x_norm': x_norm, 'y_norm': y_norm})
+            self._frame_widget.add_point(x_norm, y_norm, seq)
+            self._diagram.mark_placed(pt_idx)
+
+        self._btn_undo.setEnabled(bool(self._placed))
+        self._btn_apply.setEnabled(True)
+        self._btn_save_apply.setEnabled(True)
+        self._refresh_point_list()
+
+        # Colore badge confidence
+        conf = result.confidence
+        if conf >= 0.7:
+            color = "#22c55e"
+            label = "Alta"
+        elif conf >= 0.45:
+            color = "#f59e0b"
+            label = "Media"
+        else:
+            color = "#ef4444"
+            label = "Bassa"
+
+        self._lbl_auto_result.setText(
+            f"✅ Rilevamento completato!\n"
+            f"Metodo: {result.method}  |  "
+            f"Confidence: {conf:.0%} ({label})\n"
+            f"4 angoli campo rilevati — puoi correggere manualmente se necessario.")
+        self._lbl_auto_result.setStyleSheet(f"color: {color}; font-size: 11px;")
+
+        self._lbl_status.setText(
+            f"Auto-detection OK ({conf:.0%}). Puoi applicare o correggere i punti.")
+        self._lbl_status.setStyleSheet(f"color: {color}; font-size: 11px;")
 
     # ── Lista punti ────────────────────────────────────────────────────────
     def _refresh_point_list(self):
