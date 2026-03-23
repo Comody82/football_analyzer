@@ -4,6 +4,20 @@ Questo file documenta le decisioni di design e le preferenze dell'utente per il 
 
 ---
 
+## Testing — Regola Obbligatoria
+
+Per ogni modifica implementata, Claude deve verificare nell'ordine:
+
+1. `python -c "import ..."` — sintassi e import corretti
+2. Test logica core — verifica che la funzione principale funzioni con dati reali/sintetici
+3. `python main_web.py` da `C:\football_analyzer` — app si avvia senza crash
+
+**Perché**: l'utente fa solo il test visivo. Errori tecnici, import rotti, crash all'avvio devono essere intercettati da Claude prima della consegna.
+
+**Nota**: il worktree è isolato. Testare sempre da `C:\football_analyzer` (repo principale), non dal worktree.
+
+---
+
 ## Workflow Sessioni Claude
 
 > **IMPORTANTE — leggere prima di chiudere ogni sessione**
