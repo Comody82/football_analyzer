@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0B1220; overflow: hidden; width: 100vw; height: 100vh;
+      display: flex; flex-direction: column; font-family: Arial, sans-serif;
+    }
+    #toolbar {
+      display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+      background: #0d1b2e; border-bottom: 1px solid rgba(255,255,255,0.07);
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .tab-btn {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      color: #8fadc8; font-size: 11px; padding: 3px 11px; border-radius: 5px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .tab-btn.active { background: #17806a; border-color: #1e947c; color: #eafff8; }
+    .sep { width: 1px; height: 18px; background: rgba(255,255,255,0.1); margin: 0 3px; flex-shrink: 0; }
+    .filter-btn {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      color: #7a9ab5; font-size: 11px; padding: 3px 9px; border-radius: 4px; cursor: pointer;
+      transition: background 0.12s;
+    }
+    .filter-btn.active {
+      background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.28); color: #e8f4ff;
+    }
+    #playerSelect {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+      color: #7a9ab5; font-size: 11px; padding: 3px 7px; border-radius: 4px; cursor: pointer;
+      outline: none;
+    }
+    #playerSelect option { background: #0d1b2e; color: #c8d8ec; }
+    #canvas-wrap { flex: 1; position: relative; overflow: hidden; }
+    #heatmap-canvas { width: 100%; height: 100%; display: block; }
+    #overlay-msg {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      color: rgba(255,255,255,0.38); font-size: 12px; text-align: center;
+      pointer-events: none; display: none; line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <button class="tab-btn active" id="tabHeatmap" onclick="setTab('heatmap')">🔥 Heatmap</button>
+    <button class="tab-btn" id="tabPressing" onclick="setTab('pressing')">⚡ Pressing</button>
+    <div class="sep"></div>
+    <button class="filter-btn active" id="fAll" onclick="setFilter('all')">Tutti</button>
+    <button class="filter-btn" id="fA" onclick="setFilter('a')">Squadra A</button>
+    <button class="filter-btn" id="fB" onclick="setFilter('b')">Squadra B</button>
+    <select id="playerSelect" onchange="setPlayer(this.value)">
+      <option value="">👤 Giocatore...</option>
+    </select>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="heatmap-canvas"></canvas>
+    <div id="overlay-msg"></div>
+  </div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    let backend = null;
+    let heatmapData = null;
+    let currentTab = 'heatmap';
+    let currentFilter = 'all';
+    let currentPlayer = '';
+
+    const canvas = document.getElementById('heatmap-canvas');
+    const ctx = canvas.getContext('2d');
+    const overlayMsg = document.getElementById('overlay-msg');
+
+    // ── Tab / Filter ──────────────────────────────────────────────────────────
+    function setTab(tab) {
+      currentTab = tab;
+      document.getElementById('tabHeatmap').classList.toggle('active', tab === 'heatmap');
+      document.getElementById('tabPressing').classList.toggle('active', tab === 'pressing');
+      render();
+    }
+
+    function setFilter(f) {
+      currentFilter = f;
+      currentPlayer = '';
+      document.getElementById('playerSelect').value = '';
+      ['fAll','fA','fB'].forEach(id =>
+        document.getElementById(id).classList.toggle('active', id === 'f' + f.charAt(0).toUpperCase() + f.slice(1))
+      );
+      document.getElementById('fAll').classList.toggle('active', f === 'all');
+      document.getElementById('fA').classList.toggle('active', f === 'a');
+      document.getElementById('fB').classList.toggle('active', f === 'b');
+      render();
+    }
+
+    function setPlayer(val) {
+      currentPlayer = val;
+      if (val) {
+        currentFilter = '';
+        ['fAll','fA','fB'].forEach(id => document.getElementById(id).classList.remove('active'));
+      }
+      render();
+    }
+
+    // ── Data loading ──────────────────────────────────────────────────────────
+    function loadData() {
+      if (!backend || typeof backend.getHeatmapData !== 'function') return;
+      backend.getHeatmapData(function(json) {
+        try {
+          heatmapData = JSON.parse(json);
+          const sel = document.getElementById('playerSelect');
+          const prev = sel.value;
+          sel.innerHTML = '<option value="">👤 Giocatore...</option>';
+          (heatmapData.track_ids || []).forEach(function(tid) {
+            const opt = document.createElement('option');
+            opt.value = String(tid);
+            opt.textContent = 'Giocatore #' + tid;
+            sel.appendChild(opt);
+          });
+          sel.value = prev;
+          render();
+        } catch(e) {}
+      });
+    }
+
+    // ── Grid selection ────────────────────────────────────────────────────────
+    function getActiveGrid() {
+      if (!heatmapData) return null;
+      if (currentTab === 'pressing') {
+        if (!heatmapData.has_pressing) return null;
+        if (currentFilter === 'a') return heatmapData.pressing_a;
+        if (currentFilter === 'b') return heatmapData.pressing_b;
+        return heatmapData.pressing_all;
+      }
+      if (currentPlayer && heatmapData.track_grids) {
+        return heatmapData.track_grids[currentPlayer] || null;
+      }
+      if (currentFilter === 'a') return heatmapData.grid_a;
+      if (currentFilter === 'b') return heatmapData.grid_b;
+      return heatmapData.grid_all;
+    }
+
+    // ── Color gradient (0→transparent, 0.3→blue, 0.6→yellow, 1→red) ─────────
+    function heatColor(t) {
+      if (t <= 0.01) return null;
+      const alpha = Math.min(0.92, 0.3 + t * 0.7);
+      let r, g, b;
+      if (t < 0.25) {
+        const p = t / 0.25;
+        r = 0; g = Math.round(p * 80); b = Math.round(120 + p * 135);
+      } else if (t < 0.5) {
+        const p = (t - 0.25) / 0.25;
+        r = Math.round(p * 0); g = Math.round(80 + p * 175); b = Math.round(255 - p * 255);
+      } else if (t < 0.75) {
+        const p = (t - 0.5) / 0.25;
+        r = Math.round(p * 255); g = 255; b = 0;
+      } else {
+        const p = (t - 0.75) / 0.25;
+        r = 255; g = Math.round(255 - p * 255); b = 0;
+      }
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha.toFixed(2) + ')';
+    }
+
+    // ── Field drawing ─────────────────────────────────────────────────────────
+    function getFieldBounds(W, H) {
+      const PAD = 8;
+      return { x0: PAD, y0: PAD, fw: W - PAD * 2, fh: H - PAD * 2 };
+    }
+
+    function drawFieldBackground(W, H) {
+      const { x0, y0, fw, fh } = getFieldBounds(W, H);
+      ctx.fillStyle = '#1e6b30';
+      ctx.fillRect(x0, y0, fw, fh);
+      // Alternating stripes
+      const stripeW = fw / 10;
+      for (let i = 0; i < 10; i++) {
+        if (i % 2 === 0) {
+          ctx.fillStyle = 'rgba(0,0,0,0.06)';
+          ctx.fillRect(x0 + i * stripeW, y0, stripeW, fh);
+        }
+      }
+    }
+
+    function drawFieldLines(W, H) {
+      const { x0, y0, fw, fh } = getFieldBounds(W, H);
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 1.2;
+      // Outline
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, fw - 1, fh - 1);
+      // Halfway line
+      ctx.beginPath();
+      ctx.moveTo(x0 + fw / 2, y0);
+      ctx.lineTo(x0 + fw / 2, y0 + fh);
+      ctx.stroke();
+      // Center circle (r = 9.15m / 105m * fw)
+      const cr = (9.15 / 105) * fw;
+      if (cr > 2) {
+        ctx.beginPath();
+        ctx.arc(x0 + fw / 2, y0 + fh / 2, cr, 0, Math.PI * 2);
+        ctx.stroke();
+        // Center dot
+        ctx.beginPath();
+        ctx.arc(x0 + fw / 2, y0 + fh / 2, 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.fill();
+      }
+      // Penalty areas (16.5m wide, 40.3m tall)
+      const paW = (16.5 / 105) * fw;
+      const paH = (40.32 / 68) * fh;
+      const paTop = y0 + (fh - paH) / 2;
+      ctx.strokeRect(x0, paTop, paW, paH);
+      ctx.strokeRect(x0 + fw - paW, paTop, paW, paH);
+      // Goal areas (5.5m wide, 18.32m tall)
+      const gaW = (5.5 / 105) * fw;
+      const gaH = (18.32 / 68) * fh;
+      const gaTop = y0 + (fh - gaH) / 2;
+      ctx.strokeRect(x0, gaTop, gaW, gaH);
+      ctx.strokeRect(x0 + fw - gaW, gaTop, gaW, gaH);
+      // Penalty spots
+      const pspot = (11 / 105) * fw;
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.beginPath();
+      ctx.arc(x0 + pspot, y0 + fh / 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x0 + fw - pspot, y0 + fh / 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── Gaussian smoothing ────────────────────────────────────────────────────
+    function gaussianSmooth(grid, radius) {
+      const rows = grid.length;
+      if (!rows) return grid;
+      const cols = grid[0].length;
+      const out = [];
+      for (let r = 0; r < rows; r++) {
+        out.push(new Float32Array(cols));
+        for (let c = 0; c < cols; c++) {
+          let sum = 0, weight = 0;
+          for (let dr = -radius; dr <= radius; dr++) {
+            for (let dc = -radius; dc <= radius; dc++) {
+              const nr = r + dr, nc = c + dc;
+              if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+              const w = Math.exp(-(dr * dr + dc * dc) / (radius * radius));
+              sum += grid[nr][nc] * w;
+              weight += w;
+            }
+          }
+          out[r][c] = weight > 0 ? sum / weight : 0;
+        }
+      }
+      return out;
+    }
+
+    // ── Main render ───────────────────────────────────────────────────────────
+    function render() {
+      const W = canvas.width, H = canvas.height;
+      if (W < 4 || H < 4) return;
+
+      ctx.clearRect(0, 0, W, H);
+      drawFieldBackground(W, H);
+
+      // No data state
+      if (!heatmapData) {
+        drawFieldLines(W, H);
+        showMsg('Esegui prima l\'analisi automatica\nper vedere la heatmap.');
+        return;
+      }
+
+      // Pressing tab with no pressing events
+      if (currentTab === 'pressing' && !heatmapData.has_pressing) {
+        drawFieldLines(W, H);
+        showMsg('Nessun evento pressing rilevato\nnell\'analisi automatica.');
+        return;
+      }
+
+      const grid = getActiveGrid();
+      const COLS = heatmapData.cols || 40;
+      const ROWS = heatmapData.rows || 26;
+
+      // Check if grid has data
+      let hasData = false;
+      if (grid && grid.length) {
+        for (let r = 0; r < grid.length && !hasData; r++)
+          for (let c = 0; c < (grid[r] ? grid[r].length : 0) && !hasData; c++)
+            if (grid[r][c] > 0) hasData = true;
+      }
+
+      if (!hasData) {
+        drawFieldLines(W, H);
+        showMsg(currentPlayer ? 'Nessun dato per questo giocatore.' : 'Nessun dato disponibile.');
+        return;
+      }
+
+      hideMsg();
+
+      // Smooth grid
+      const smoothed = gaussianSmooth(grid, 2);
+
+      // Find max
+      let maxVal = 0;
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+          if (smoothed[r] && smoothed[r][c] > maxVal) maxVal = smoothed[r][c];
+
+      if (maxVal === 0) { drawFieldLines(W, H); return; }
+
+      // Draw heatmap cells
+      const { x0, y0, fw, fh } = getFieldBounds(W, H);
+      const cellW = fw / COLS + 0.5;
+      const cellH = fh / ROWS + 0.5;
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          if (!smoothed[r]) continue;
+          const t = smoothed[r][c] / maxVal;
+          if (t < 0.02) continue;
+          const color = heatColor(t);
+          if (!color) continue;
+          ctx.fillStyle = color;
+          ctx.fillRect(x0 + c * fw / COLS, y0 + r * fh / ROWS, cellW, cellH);
+        }
+      }
+
+      // Draw field lines on top (semi-transparent)
+      ctx.globalAlpha = 0.65;
+      drawFieldLines(W, H);
+      ctx.globalAlpha = 1;
+    }
+
+    function showMsg(text) {
+      overlayMsg.style.display = 'block';
+      overlayMsg.innerHTML = text.replace(/\n/g, '<br>');
+    }
+    function hideMsg() {
+      overlayMsg.style.display = 'none';
+    }
+
+    // ── Canvas resize ─────────────────────────────────────────────────────────
+    function resizeCanvas() {
+      const wrap = document.getElementById('canvas-wrap');
+      const w = wrap.clientWidth || 1;
+      const h = wrap.clientHeight || 1;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      render();
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    setTimeout(resizeCanvas, 80);
+    setTimeout(resizeCanvas, 400);
+
+    // ── QWebChannel init ──────────────────────────────────────────────────────
+    new QWebChannel(qt.webChannelTransport, function(channel) {
+      backend = channel.objects.backend;
+      loadData();
+      if (backend.videoLoaded) {
+        backend.videoLoaded.connect(function() { setTimeout(loadData, 600); });
+      }
+    });
+  </script>
+</body>
+</html>

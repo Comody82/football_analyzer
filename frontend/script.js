@@ -919,6 +919,12 @@ document.getElementById('btnTacticalBoard')?.addEventListener('click', () => {
     }
 });
 
+document.getElementById('btnHeatmap')?.addEventListener('click', () => {
+    if (backend && typeof backend.toggleHeatmap === 'function') {
+        backend.toggleHeatmap();
+    }
+});
+
 document.getElementById('btnShowTracking')?.addEventListener('click', () => {
     if (!backend || typeof backend.toggleTrackingOverlay !== 'function') return;
     const res = backend.toggleTrackingOverlay();

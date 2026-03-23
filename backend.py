@@ -33,6 +33,7 @@ class BackendBridge(QObject):
     timeUpdated = pyqtSignal(str)  # JSON {current, duration} per barra progresso
     zoomUpdated = pyqtSignal(float)  # livello zoom (1.0–5.0)
     zoomZoneFactorUpdated = pyqtSignal(float)  # fattore zoom zona (1.0–5.0)
+    toastRequested = pyqtSignal(str, str)  # (messaggio, tipo: 'info'|'warn')
 
     def __init__(self, video_player=None, drawing_overlay=None, parent_window=None):
         super().__init__()
@@ -1336,6 +1337,36 @@ class BackendBridge(QObject):
                 return json.dumps(tracks)
         return '{}'
 
+    @pyqtSlot(result=str)
+    def getBallTracksJson(self):
+        if self.video_player:
+            tracks = getattr(self.video_player, '_ball_tracks', None)
+            if tracks:
+                return json.dumps(tracks)
+        return '{}'
+
+    def _check_video_integrity(self, path: str):
+        """
+        Verifica che il file video sia leggibile e abbia almeno un frame.
+        Ritorna (True, '') se OK, oppure (False, messaggio_errore).
+        """
+        import cv2
+        from pathlib import Path
+        p = Path(path)
+        if not p.exists():
+            return False, f"File non trovato:\n{path}"
+        if p.stat().st_size == 0:
+            return False, f"Il file video è vuoto:\n{p.name}"
+        cap = cv2.VideoCapture(str(p))
+        if not cap.isOpened():
+            cap.release()
+            return False, f"Impossibile aprire il video:\n{p.name}\n\nFormato non supportato o file corrotto."
+        frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        cap.release()
+        if frames is not None and frames <= 0:
+            return False, f"Il video non contiene frame:\n{p.name}"
+        return True, ''
+
     @pyqtSlot(result=bool)
     def toggleTacticalBoard(self):
         if self.parent_window and hasattr(self.parent_window, 'web_view_tactical'):
@@ -1344,6 +1375,118 @@ class BackendBridge(QObject):
             tb.setVisible(visible)
             return visible
         return False
+
+    @pyqtSlot(result=bool)
+    def toggleHeatmap(self):
+        if self.parent_window and hasattr(self.parent_window, 'web_view_heatmap'):
+            hm = self.parent_window.web_view_heatmap
+            visible = not hm.isVisible()
+            hm.setVisible(visible)
+            return visible
+        return False
+
+    @pyqtSlot(result=str)
+    def getHeatmapData(self):
+        """Calcola griglie di densità per heatmap e pressing map."""
+        COLS, ROWS = 40, 26
+
+        def empty_grid():
+            return [[0.0] * COLS for _ in range(ROWS)]
+
+        try:
+            tracks = getattr(self.video_player, '_player_tracks', None) if self.video_player else None
+            if not tracks or not tracks.get("frames"):
+                return json.dumps({
+                    "grid_all": empty_grid(), "grid_a": empty_grid(), "grid_b": empty_grid(),
+                    "track_grids": {}, "track_ids": [],
+                    "pressing_all": empty_grid(), "pressing_a": empty_grid(), "pressing_b": empty_grid(),
+                    "has_pressing": False, "cols": COLS, "rows": ROWS,
+                })
+
+            frames = tracks.get("frames", [])
+            w = max(1, int(tracks.get("width", 1) or 1))
+            h = max(1, int(tracks.get("height", 1) or 1))
+
+            grid_all = empty_grid()
+            grid_a   = empty_grid()
+            grid_b   = empty_grid()
+            track_grids = {}
+            track_ids = set()
+
+            # Sample every 5th frame for performance
+            for fi, frame_data in enumerate(frames):
+                if fi % 5 != 0:
+                    continue
+                for det in frame_data.get("detections", []):
+                    if det.get("role") in ("ball", "goal", "referee"):
+                        continue
+                    cx = (det.get("x", 0) + det.get("w", 0) * 0.5) / w
+                    cy = (det.get("y", 0) + det.get("h", 0) * 0.5) / h
+                    col = max(0, min(COLS - 1, int(cx * COLS)))
+                    row = max(0, min(ROWS - 1, int(cy * ROWS)))
+                    team = det.get("team", -1)
+                    tid  = det.get("track_id", -1)
+
+                    grid_all[row][col] += 1
+                    if team == 0:
+                        grid_a[row][col] += 1
+                    elif team == 1:
+                        grid_b[row][col] += 1
+                    if tid >= 0:
+                        track_ids.add(tid)
+                        if tid not in track_grids:
+                            track_grids[tid] = empty_grid()
+                        track_grids[tid][row][col] += 1
+
+            # Pressing: aggregate positions near pressing events
+            pressing_all = empty_grid()
+            pressing_a   = empty_grid()
+            pressing_b   = empty_grid()
+            pressing_evts = [e for e in self._automatic_events if e.get("type") == "pressing"]
+            has_pressing = bool(pressing_evts)
+            if pressing_evts:
+                fps = 25.0
+                for pe in pressing_evts:
+                    fi_center = int(pe.get("timestamp_ms", 0) * fps / 1000)
+                    for offset in range(-25, 26, 5):
+                        fii = fi_center + offset
+                        if not (0 <= fii < len(frames)):
+                            continue
+                        for det in frames[fii].get("detections", []):
+                            if det.get("role") in ("ball", "goal", "referee"):
+                                continue
+                            cx = (det.get("x", 0) + det.get("w", 0) * 0.5) / w
+                            cy = (det.get("y", 0) + det.get("h", 0) * 0.5) / h
+                            col = max(0, min(COLS - 1, int(cx * COLS)))
+                            row = max(0, min(ROWS - 1, int(cy * ROWS)))
+                            team = det.get("team", -1)
+                            pressing_all[row][col] += 1
+                            if team == 0:
+                                pressing_a[row][col] += 1
+                            elif team == 1:
+                                pressing_b[row][col] += 1
+
+            return json.dumps({
+                "grid_all":    grid_all,
+                "grid_a":      grid_a,
+                "grid_b":      grid_b,
+                "track_grids": {str(k): v for k, v in track_grids.items()},
+                "track_ids":   sorted(list(track_ids)),
+                "pressing_all": pressing_all,
+                "pressing_a":   pressing_a,
+                "pressing_b":   pressing_b,
+                "has_pressing": has_pressing,
+                "cols": COLS,
+                "rows": ROWS,
+            })
+        except Exception as e:
+            return json.dumps({
+                "error": str(e), "cols": COLS, "rows": ROWS,
+                "grid_all": empty_grid(), "grid_a": empty_grid(), "grid_b": empty_grid(),
+                "track_grids": {}, "track_ids": [],
+                "pressing_all": empty_grid(), "pressing_a": empty_grid(), "pressing_b": empty_grid(),
+                "has_pressing": False,
+            })
 
 
 class _VideoDownloadWorker(QObject):

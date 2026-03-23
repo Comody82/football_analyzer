@@ -116,10 +116,12 @@
     // ── Disegno campo ────────────────────────────────────────────────────
     function drawField(ctx, canvas) {
       const PAD = 12;
+      if (canvas.width < PAD * 2 + 20 || canvas.height < PAD * 2 + 20) return { ox: 0, oy: 0, fW: 0, fH: 0 };
       const RATIO = 105 / 68;
       let fW = canvas.width - PAD * 2;
       let fH = fW / RATIO;
       if (fH > canvas.height - PAD * 2) { fH = canvas.height - PAD * 2; fW = fH * RATIO; }
+      if (fW <= 0 || fH <= 0) return { ox: 0, oy: 0, fW: 0, fH: 0 };
       const ox = (canvas.width - fW) / 2;
       const oy = (canvas.height - fH) / 2;
 

@@ -73,6 +73,9 @@ class ProjectRepository:
     def get_project_file_path(self, project_id: str) -> str:
         return str((self.projects_dir / f"{project_id}.json").absolute())
 
+    def get_team_links_path(self, project_id: str) -> str:
+        return str((self.projects_dir / f"{project_id}_team_links.json").absolute())
+
     def create(self, name: str) -> ProjectMeta:
         now = _now_iso()
         project = ProjectMeta(
