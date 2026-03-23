@@ -47,12 +47,12 @@
 
 ### UI / UX
 - [ ] Rifare estetica generale interfaccia
-- [ ] Inserire Dashboard con squadre e giocatori
+- [x] Inserire Dashboard con squadre e giocatori
 - [ ] Dare errore se si clicca "Fine" senza aver fatto "Inizia clip"
 
 ### Impostazioni
-- [ ] Versione software
-- [ ] Licenza valida fino a…
+- [x] Versione software
+- [x] Licenza valida fino a…
 - [ ] Utente loggato
 - [ ] Lingua
 
@@ -84,8 +84,8 @@ Video input (qualsiasi camera)
 ## 🚀 FUNZIONALITÀ PIANIFICATE
 
 ### 📹 Clip & Video Intelligence (Prelyt Clips)
-- [ ] **Clip automatiche**: cliccando "Tiro" salva automaticamente 10 sec precedenti + 5 successivi
-- [ ] **Highlights automatici**: AI genera da sola i tagli video dei momenti salienti
+- [x] **Clip automatiche**: cliccando "Tiro" salva automaticamente 10 sec precedenti + 5 successivi
+- [x] **Highlights automatici**: AI genera da sola i tagli video dei momenti salienti
 - [ ] **Playlist clip**: organizzazione per giocatore, fase difensiva/offensiva, reparto
 - [ ] **Freeze Frame automatico**: pausa + disegno frecce su errore tattico + ripresa dopo 3 sec
 - [ ] **Zoom intelligente**: zoom automatico sulla zona dell'azione principale (regia TV)
@@ -102,9 +102,9 @@ Video input (qualsiasi camera)
 - [ ] **Miglioramento frecce in 3D**
 
 ### 📊 Statistiche e Report (Prelyt Insights)
-- [ ] **Statistiche automatiche** con report stampabile
+- [x] **Statistiche automatiche** con report stampabile
 - [ ] **Riepilogo numerico visivo**: possesso palla, conteggio tiri (specchio/fuori)
-- [ ] **Heatmaps**: mappe di calore zone più occupate dai giocatori
+- [x] **Heatmaps**: mappe di calore zone più occupate dai giocatori
 - [ ] **Mappa tiri**: punti precisi sul campo da dove sono partite le conclusioni
 - [ ] **Misuratore distanze**: linea che mostra distanza tra reparti (es. difesa-centrocampo)
 - [ ] **Filtro per periodo**: analizzare solo un intervallo di tempo (es. primi 15 min del 2° tempo)
@@ -171,10 +171,10 @@ Frame 4K raw (3840×2160) — per tutta la partita
   - Output: report Markdown/PDF con testo + grafici
 - [ ] **Analisi pattern tattici**: riconoscimento modulo reale (4-4-2, 3-5-2, ecc.)
 - [ ] **Pitch Control**: mappa di dominanza (quale giocatore arriverebbe prima sulla palla)
-- [ ] **Pressing Intensity / PPDA**: velocità con cui i difensori accorciano sull'avversario
+- [x] **Pressing Intensity / PPDA**: velocità con cui i difensori accorciano sull'avversario
 - [ ] **Expected Passes (xP)**: difficoltà di ogni passaggio
 - [ ] **Pericolosità zona**: valore di "pericolo" per ogni zona del campo in tempo reale
-- [ ] **Event Detection automatico**: riconoscimento automatico cross, tiri, contrasti (SlowFast/Video Transformers)
+- [x] **Event Detection automatico**: riconoscimento automatico cross, tiri, contrasti (SlowFast/Video Transformers)
 - [ ] **Analisi "cosa non ha funzionato"**: relazione descrittiva completa post-partita
 
 ### 🎥 Virtual Camera – Zoom Automatico (Prelyt Clips)
@@ -220,11 +220,11 @@ Frame 4K raw (3840×2160) — per tutta la partita
 ### 🗺️ Field Calibration + Coordinate Mapping (Prelyt Core)
 > Trasforma coordinate pixel → metri reali. Sblocca statistiche, heatmap, lavagna 2D precisa e tutto il Metrics Engine.
 
-- [ ] **Field Calibration UI**: utente clicca 4-6 punti noti sul campo (angoli area, centrocampo) → calcola `homography_matrix`
-- [ ] **Homography Matrix**: `cv2.findHomography(pixel_points, real_world_points)` → matrice di trasformazione
-- [ ] **Coordinate Mapping**: `real_coords = cv2.perspectiveTransform(pixel_coords, H)` → output in metri (0-105 x, 0-68 y)
+- [x] **Field Calibration UI**: utente clicca 4-6 punti noti sul campo (angoli area, centrocampo) → calcola `homography_matrix`
+- [x] **Homography Matrix**: `cv2.findHomography(pixel_points, real_world_points)` → matrice di trasformazione
+- [x] **Coordinate Mapping**: `real_coords = cv2.perspectiveTransform(pixel_coords, H)` → output in metri (0-105 x, 0-68 y)
 - [ ] **Output per frame**: ogni detection include `{x_m: 42.3, y_m: 18.2}` oltre alle coordinate pixel
-- [ ] **Calibrazione salvata per progetto**: ricalibra una volta sola, usata per tutta la partita
+- [x] **Calibrazione salvata per progetto**: ricalibra una volta sola, usata per tutta la partita
 - [ ] **Validazione visiva**: overlay campo reale su frame per verificare correttezza calibrazione
 - [ ] **Preset comuni**: campo 11 standard (105×68m), campo 7 (60×40m), campo 5 (40×20m)
 
@@ -274,10 +274,10 @@ Per ogni frame (o ogni N frame):
 
 **Dataset utile:** SoccerNet-Calibration (già citato nei dataset di riferimento)
 
-- [ ] **Rilevamento linee per-frame**: Hough transform su frame preprocessato (contrasto linee bianche)
-- [ ] **Template matching campo**: modello 2D del campo → matcha intersezioni visibili → RANSAC homography
+- [x] **Rilevamento linee per-frame**: Hough transform su frame preprocessato (contrasto linee bianche)
+- [x] **Template matching campo**: modello 2D del campo → matcha intersezioni visibili → RANSAC homography
 - [ ] **Stabilizzazione inter-frame**: smoothing della matrice H tra frame consecutivi per evitare salti
-- [ ] **Fallback graceful**: se frame ha troppe poche linee → usa H del frame precedente + flag "stimata"
+- [x] **Fallback graceful**: se frame ha troppe poche linee → usa H del frame precedente + flag "stimata"
 - [ ] **Integrazione modello DL** (opzionale): ONNX export del modello SoccerNet-Calibration
 - [ ] **Storage H per-frame**: salva nel tracking JSON come `{frame_id: H_matrix}`
 - [ ] **Test su video VEO reale**: validare precisione coordinate su video broadcast
@@ -653,7 +653,7 @@ Video raw 180°
 - [x] **UI 4 colonne cascading**: Nazione → Lega → Squadra → Rosa/Giocatori (stile Finder)
 - [x] **Ricerca per colonna**: campo di ricerca testuale sopra ogni colonna → filtra in tempo reale
 - [ ] **Script di generazione DB**: scarica Serie A, B, C, Champions League, Europa League, Lega Pro → salva `teams_db.json`
-- [ ] **Ricerca locale**: l'utente cerca "Milan" → risultati istantanei dal JSON locale, senza internet
+- [x] **Ricerca locale**: l'utente cerca "Milan" → risultati istantanei dal JSON locale, senza internet
 - [ ] **Fallback manuale**: squadre dilettantistiche non in API-Football → inserimento manuale come ora
 - [ ] **Distribuzione con l'app**: `teams_db.json` incluso nel pacchetto installazione
 
