@@ -1312,6 +1312,70 @@ class WorkspacePage(QWidget):
         self.web_view_left.setVisible(True)
         self._update_open_video_cta_visibility()
 
+    def _try_auto_calibration(self, video_path, project_dir):
+        """Tenta calibrazione automatica silenziosamente. Se fallisce mostra dialog minimo.
+        Ritorna il Path del file calibrazione se salvato, None altrimenti."""
+        import cv2 as _cv2
+        import json as _json
+        import numpy as _np
+        from pathlib import Path as _Path
+        from analysis.config import get_calibration_path
+        from analysis.homography import clear_calibrator_cache
+
+        # Estrai un frame rappresentativo (10% del video)
+        frame_bgr = None
+        try:
+            cap = _cv2.VideoCapture(video_path)
+            total = int(cap.get(_cv2.CAP_PROP_FRAME_COUNT))
+            cap.set(_cv2.CAP_PROP_POS_FRAMES, max(0, total // 10))
+            ok, frame_bgr = cap.read()
+            cap.release()
+        except Exception:
+            frame_bgr = None
+
+        # Prova rilevamento automatico
+        auto_ok = False
+        if frame_bgr is not None:
+            try:
+                from analysis.auto_field_detector import AutoFieldDetector
+                result = AutoFieldDetector().detect(frame_bgr)
+                if result.is_valid and result.homography is not None:
+                    cal_path = get_calibration_path(project_dir)
+                    cal_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(cal_path, "w", encoding="utf-8") as f:
+                        _json.dump({
+                            "pixel_points": [],
+                            "field_points": [],
+                            "homography": _np.array(result.homography).tolist(),
+                            "source": "auto",
+                        }, f, indent=2)
+                    clear_calibrator_cache()
+                    auto_ok = True
+                    return cal_path
+            except Exception:
+                pass
+
+        # Auto fallita → dialog minimo
+        cal_msg = QMessageBox(self.window())
+        cal_msg.setWindowTitle("Calibrazione campo")
+        cal_msg.setIcon(QMessageBox.Warning)
+        cal_msg.setText(
+            "<b>⚠️ Calibrazione automatica non riuscita.</b><br><br>"
+            "Il campo non è stato rilevato nel video.<br>"
+            "Puoi calibrare manualmente oppure continuare senza metriche precise."
+        )
+        cal_msg.setTextFormat(Qt.RichText)
+        btn_manual = cal_msg.addButton("✏️  Calibra manualmente", QMessageBox.AcceptRole)
+        btn_skip   = cal_msg.addButton("Continua senza", QMessageBox.RejectRole)
+        cal_msg.setDefaultButton(btn_skip)
+        cal_msg.exec_()
+        if cal_msg.clickedButton() == btn_manual:
+            self.show_field_calibration()
+            cal_path = get_calibration_path(project_dir)
+            if cal_path.exists():
+                return cal_path
+        return None
+
     def show_field_calibration(self):
         """Apre il dialog di calibrazione campo (per analisi automatica)."""
         from calibration_registry import CalibrationRegistry
@@ -1547,34 +1611,11 @@ class WorkspacePage(QWidget):
 
         use_local = rb_local.isChecked()
 
-        # Controllo calibrazione campo: suggerisci solo se non già presente
+        # Calibrazione campo: tenta automaticamente, dialog solo se fallisce
         from analysis.config import get_calibration_path
         cal_path = get_calibration_path(project_dir)
         if not cal_path.exists():
-            cal_msg = QMessageBox(self.window())
-            cal_msg.setWindowTitle("Calibrazione campo")
-            cal_msg.setIcon(QMessageBox.Information)
-            cal_msg.setText(
-                "<b>Calibrazione campo non trovata.</b><br><br>"
-                "La calibrazione trasforma le posizioni dei giocatori da pixel a metri reali, "
-                "abilitando statistiche precise (distanza percorsa, heatmap, pressing).<br><br>"
-                "<b>Quando calibrare:</b> se il video riprende il <b>campo intero</b> "
-                "(camera fissa wide, drone, tribuna alta).<br><br>"
-                "<b>Quando NON calibrare:</b> se stai usando un <b>video broadcast TV</b> "
-                "— la camera zooma e non vedi mai i 4 angoli del campo, quindi la calibrazione "
-                "non è possibile e le statistiche rimarranno approssimative.<br><br>"
-                "Vuoi calibrare il campo prima di avviare l'analisi?"
-            )
-            cal_msg.setTextFormat(Qt.RichText)
-            btn_calibra = cal_msg.addButton("Calibra ora", QMessageBox.AcceptRole)
-            btn_skip = cal_msg.addButton("Continua senza", QMessageBox.RejectRole)
-            cal_msg.setDefaultButton(btn_skip)
-            cal_msg.exec_()
-            if cal_msg.clickedButton() == btn_calibra:
-                self.show_field_calibration()
-                # Se dopo la calibrazione l'utente ha salvato, procedi. Altrimenti annulla.
-                if not cal_path.exists():
-                    return  # ha aperto il dialog ma non ha salvato → annulla analisi
+            cal_path = self._try_auto_calibration(video_path, project_dir) or cal_path
 
         if use_local:
             self._set_analysis_mode("local")
