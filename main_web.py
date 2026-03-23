@@ -317,6 +317,12 @@ class WorkspacePage(QWidget):
         btn_stats.clicked.connect(self._on_statistics_clicked)
         topbar_layout.addWidget(btn_stats, 0, Qt.AlignVCenter)
 
+        btn_interactive_board = QPushButton("🧩 Lavagna")
+        btn_interactive_board.setProperty("class", "workspaceTopBtn")
+        btn_interactive_board.setToolTip("Apri Lavagna Tattica Interattiva")
+        btn_interactive_board.clicked.connect(self._open_interactive_board)
+        topbar_layout.addWidget(btn_interactive_board, 0, Qt.AlignVCenter)
+
         self.btn_export_report = QPushButton("Esporta report")
         self.btn_export_report.setProperty("class", "workspaceTopBtn")
         self.btn_export_report.clicked.connect(self._on_export_report_clicked)
@@ -1419,6 +1425,28 @@ class WorkspacePage(QWidget):
             lambda cal_id: _persist_to_project(
                 (registry.get(cal_id) or {}).get("matrix")))
         dlg.calibration_applied.connect(_persist_to_project)
+        dlg.exec_()
+
+    def _open_interactive_board(self):
+        """Apre la Lavagna Tattica Interattiva in una finestra separata."""
+        from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
+        from PyQt5.QtCore import QUrl
+        from pathlib import Path as _Path
+
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle("🧩 Lavagna Tattica Interattiva")
+        dlg.resize(1100, 720)
+        dlg.setStyleSheet("background:#0B1220;")
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        view = QWebEngineView(dlg)
+        view.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+        view.page().setBackgroundColor(QColor(0x0B, 0x12, 0x20))
+        board_url = QUrl.fromLocalFile(
+            str(_Path(__file__).parent / "frontend" / "interactive_board.html"))
+        view.load(board_url)
+        layout.addWidget(view)
         dlg.exec_()
 
     def show_video_preprocessing(self):
