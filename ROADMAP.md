@@ -223,9 +223,9 @@ Frame 4K raw (3840×2160) — per tutta la partita
 - [x] **Field Calibration UI**: utente clicca 4-6 punti noti sul campo (angoli area, centrocampo) → calcola `homography_matrix`
 - [x] **Homography Matrix**: `cv2.findHomography(pixel_points, real_world_points)` → matrice di trasformazione
 - [x] **Coordinate Mapping**: `real_coords = cv2.perspectiveTransform(pixel_coords, H)` → output in metri (0-105 x, 0-68 y)
-- [ ] **Output per frame**: ogni detection include `{x_m: 42.3, y_m: 18.2}` oltre alle coordinate pixel
+- [x] **Output per frame**: ogni detection include `{x_m: 42.3, y_m: 18.2}` oltre alle coordinate pixel
 - [x] **Calibrazione salvata per progetto**: ricalibra una volta sola, usata per tutta la partita
-- [ ] **Validazione visiva**: overlay campo reale su frame per verificare correttezza calibrazione
+- [x] **Validazione visiva**: overlay campo reale su frame per verificare correttezza calibrazione
 - [ ] **Preset comuni**: campo 11 standard (105×68m), campo 7 (60×40m), campo 5 (40×20m)
 
 ---
@@ -360,33 +360,33 @@ Per ogni frame (o ogni N frame):
 ### ✂️ Game Segment Detection – Taglio Automatico Video
 > Rileva automaticamente inizio/fine 1° tempo, intervallo, inizio/fine 2° tempo — **prima** dell'upload su R2 per risparmiare ~50% costi cloud.
 
-- [ ] **Campionamento leggero**: 1 frame ogni 2 secondi (no analisi frame-by-frame)
-- [ ] **Activity Score per frame**: `activity = 0.4*player_score + 0.3*field_score + 0.2*motion_score + 0.1*ball_score`
+- [x] **Campionamento leggero**: 1 frame ogni 2 secondi (no analisi frame-by-frame)
+- [x] **Activity Score per frame**: `activity = 0.4*player_score + 0.3*field_score + 0.2*motion_score + 0.1*ball_score`
   - Se `activity > 0.5` → partita attiva; se `≤ 0.5` → pausa/intervallo
-- [ ] **Filtraggio falsi positivi**: scarta segmenti < 2 minuti
-- [ ] **Output**: `first_half.mp4` + `second_half.mp4`
-- [ ] **UX**: timeline attività + slider manuale per correzioni utente
-- [ ] **Taglio con FFmpeg** (veloce, senza ricodifica): `ffmpeg -i input.mp4 -ss START -to END -c copy output.mp4`
-- [ ] **Precisione stimata**: 85-95% su video amatoriali senza AI pesante
-- [ ] **CRUCIALE**: taglio avviene PRIMA dell'upload su R2 → risparmio ~50% costi cloud
+- [x] **Filtraggio falsi positivi**: scarta segmenti < 2 minuti
+- [x] **Output**: `first_half.mp4` + `second_half.mp4`
+- [x] **UX**: timeline attività + slider manuale per correzioni utente
+- [x] **Taglio con FFmpeg** (veloce, senza ricodifica): `ffmpeg -i input.mp4 -ss START -to END -c copy output.mp4`
+- [x] **Precisione stimata**: 85-95% su video amatoriali senza AI pesante
+- [x] **CRUCIALE**: taglio avviene PRIMA dell'upload su R2 → risparmio ~50% costi cloud
 
 ---
 
 ### 🗺️ Lavagna Tattica 2D Sincronizzata al Video (Prelyt Tactics)
 > Visualizzazione tattica in tempo reale: i giocatori si muovono sulla mappa 2D del campo seguendo il minutaggio del video.
 
-- [ ] **Campo stilizzato 2D**: rendering vettoriale SVG/Canvas del campo da calcio (linee bianche su fondo verde) nella stessa pagina del video player
-- [ ] **Giocatori come pallini numerati**: ogni track_id = un pallino colorato (colore squadra) con numero sopra
+- [x] **Campo stilizzato 2D**: rendering vettoriale SVG/Canvas del campo da calcio (linee bianche su fondo verde) nella stessa pagina del video player
+- [x] **Giocatori come pallini numerati**: ogni track_id = un pallino colorato (colore squadra) con numero sopra
   - Squadra 0 → cerchio rosso/bianco; Squadra 1 → cerchio blu/bianco; Arbitro → cerchio giallo
   - Numero = track_id (o numero maglia se disponibile)
-- [ ] **Sincronizzazione al frame**: la posizione dei pallini si aggiorna a ogni frame del video durante la riproduzione
+- [x] **Sincronizzazione al frame**: la posizione dei pallini si aggiorna a ogni frame del video durante la riproduzione
   - Lettura da `player_tracks.json` → `frames[i].detections[j].{x, y, track_id, team}`
   - Mappatura coordinate video → coordinate campo reale (homography o proporzione semplice)
-- [ ] **Tempo reale**: i pallini si muovono fluidi seguendo il cursore del video (play, scrubbing, +5s/-5s)
-- [ ] **Palla**: pallino bianco più piccolo per la palla (se rilevata)
-- [ ] **Layout affiancato**: lavagna tattica accanto (o sotto) al video player senza aprire nuove finestre
+- [x] **Tempo reale**: i pallini si muovono fluidi seguendo il cursore del video (play, scrubbing, +5s/-5s)
+- [x] **Palla**: pallino bianco più piccolo per la palla (se rilevata)
+- [x] **Layout affiancato**: lavagna tattica accanto (o sotto) al video player senza aprire nuove finestre
 - [ ] **Hover info**: passando il mouse su un pallino → mostra `track_id`, `team`, `conf`
-- [ ] **Fase 2**: scie di movimento (trail degli ultimi N frame per ogni giocatore)
+- [x] **Fase 2**: scie di movimento (trail degli ultimi N frame per ogni giocatore)
 - [ ] **Fase 3**: esportazione snapshot PNG del campo in un dato momento
 
 ---
@@ -523,20 +523,20 @@ Camera 4K → streaming RTSP/locale
 ### 🧩 Lavagna Tattica Interattiva (Prelyt Tactics)
 > Strumento standalone per allenatori: posizionamento manuale dei giocatori sul campo, animazioni di schema, da mostrare ai giocatori prima o dopo la partita. Indipendente dall'analisi video.
 
-- [ ] **Campo 2D interattivo**: campo verde con linee bianche, orientazione verticale o orizzontale selezionabile
-- [ ] **Pedine giocatori drag & drop**: pallini colorati con ruolo/numero (POR, DC, TS, CC, AD, ecc.) trascinabili liberamente sul campo
+- [x] **Campo 2D interattivo**: campo verde con linee bianche, orientazione verticale o orizzontale selezionabile
+- [x] **Pedine giocatori drag & drop**: pallini colorati con ruolo/numero (POR, DC, TS, CC, AD, ecc.) trascinabili liberamente sul campo
   - Squadra A → colore personalizzabile (default blu)
   - Squadra B → colore personalizzabile (default rosso)
   - Portiere → colore distinto
-- [ ] **Ruoli predefiniti**: toolbar con le pedine per ogni ruolo — click per aggiungere al campo
-- [ ] **Moduli rapidi**: carica automaticamente formazione 4-4-2, 4-3-3, 3-5-2, ecc. con un click
-- [ ] **Strumenti disegno integrati**: frecce di movimento, linee tratteggiate, cerchi zona, testo libero
+- [x] **Ruoli predefiniti**: toolbar con le pedine per ogni ruolo — click per aggiungere al campo
+- [x] **Moduli rapidi**: carica automaticamente formazione 4-4-2, 4-3-3, 3-5-2, ecc. con un click
+- [x] **Strumenti disegno integrati**: frecce di movimento, linee tratteggiate, cerchi zona, testo libero
   - Freccia corsa giocatore
   - Freccia passaggio
   - Zona evidenziata (rettangolo/cerchio colorato semitrasparente)
-- [ ] **Animazione schema**: registra sequenza di posizioni → riproduci come animazione fluida per mostrare lo schema in movimento
+- [x] **Animazione schema**: registra sequenza di posizioni → riproduci come animazione fluida per mostrare lo schema in movimento
 - [ ] **Salvataggio schemi**: salva e ricarica schemi con nome (es. "Calcio d'angolo sx", "Pressing alto 4-3-3")
-- [ ] **Export immagine**: snapshot PNG/JPG della lavagna per invio su WhatsApp/email
+- [x] **Export immagine**: snapshot PNG/JPG della lavagna per invio su WhatsApp/email
 - [ ] **Export video animazione**: esporta l'animazione come MP4 per condivisione
 - [ ] **Modalità presentazione**: fullscreen per proiettare su TV/schermo nello spogliatoio
 - [ ] **Integrazione con analisi**: opzione per caricare sulla lavagna le posizioni reali rilevate dal video a un dato minuto
