@@ -317,6 +317,11 @@ class WorkspacePage(QWidget):
         btn_stats.clicked.connect(self._on_statistics_clicked)
         topbar_layout.addWidget(btn_stats, 0, Qt.AlignVCenter)
 
+        btn_comparison = QPushButton("👤 Confronto")
+        btn_comparison.setProperty("class", "workspaceTopBtn")
+        btn_comparison.clicked.connect(self._on_comparison_clicked)
+        topbar_layout.addWidget(btn_comparison, 0, Qt.AlignVCenter)
+
         btn_interactive_board = QPushButton("🧩 Lavagna")
         btn_interactive_board.setProperty("class", "workspaceTopBtn")
         btn_interactive_board.setToolTip("Apri Lavagna Tattica Interattiva")
@@ -683,6 +688,41 @@ class WorkspacePage(QWidget):
             team_colors = self._team_links.get_team_colors_dict()
         dlg = StatisticsDialog(project_dir, team_names=team_names, team_colors=team_colors,
                                parent=self.window())
+        dlg.exec_()
+
+    def _on_comparison_clicked(self):
+        """Apre il dialog Confronto Giocatori (player_comparison.html)."""
+        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PyQt5.QtWebChannel import QWebChannel
+        project_dir = self._get_project_analysis_dir()
+        if not project_dir:
+            QMessageBox.warning(self.window(), "Confronto", "Progetto non valido.")
+            return
+        from analysis.config import get_analysis_output_path
+        metrics_path = Path(get_analysis_output_path(project_dir)) / "metrics.json"
+        if not metrics_path.exists():
+            QMessageBox.information(self.window(), "Confronto Giocatori",
+                "Esegui prima un'analisi automatica per vedere le statistiche per giocatore.")
+            return
+
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle("Confronto Giocatori")
+        dlg.resize(820, 520)
+        dlg.setStyleSheet("background:#0B1220;")
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        view = QWebEngineView()
+        view.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+        view.page().setBackgroundColor(QColor(0x0B, 0x13, 0x20))
+
+        channel = QWebChannel(view.page())
+        channel.registerObject("backend", self.backend)
+        view.page().setWebChannel(channel)
+
+        url = QUrl.fromLocalFile(str(Path(__file__).parent / "frontend" / "player_comparison.html"))
+        view.load(url)
+        layout.addWidget(view)
         dlg.exec_()
 
     def _get_project_analysis_dir(self):

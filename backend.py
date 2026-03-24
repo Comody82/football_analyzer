@@ -1518,6 +1518,22 @@ class BackendBridge(QObject):
         """Permette al JS di richiedere un toast Qt. toast_type: 'info'|'warn'|'error'."""
         self.toastRequested.emit(message, toast_type)
 
+    @pyqtSlot(result=str)
+    def getMetricsJson(self):
+        """Restituisce metrics.json del progetto corrente per player_comparison.html."""
+        try:
+            if not self.project_dir:
+                return '{}'
+            from analysis.config import get_analysis_output_path
+            from pathlib import Path
+            metrics_path = Path(get_analysis_output_path(self.project_dir)) / "metrics.json"
+            if metrics_path.exists():
+                with open(metrics_path, "r", encoding="utf-8") as f:
+                    return f.read()
+        except Exception:
+            pass
+        return '{}'
+
 
 class _VideoDownloadWorker(QObject):
     finished = pyqtSignal(str)
