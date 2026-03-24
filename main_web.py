@@ -3503,7 +3503,8 @@ class DashboardPage(QWidget):
             act_layout.setContentsMargins(12, 20, 12, 12)
             act_layout.setSpacing(10)
 
-            lbl_hint = QLabel(f"Inserisci la tua chiave licenza (formato: {from_license_manager_KEY_FORMAT_HINT()})")
+            from license_manager import KEY_FORMAT_HINT
+            lbl_hint = QLabel(f"Inserisci la tua chiave licenza (formato: {KEY_FORMAT_HINT})")
             lbl_hint.setStyleSheet("color: #5a7090; font-size: 11px;")
             act_layout.addWidget(lbl_hint)
 
@@ -3587,10 +3588,6 @@ class DashboardPage(QWidget):
         if old:
             old.deleteLater()
 
-
-def from_license_manager_KEY_FORMAT_HINT():
-    from license_manager import KEY_FORMAT_HINT
-    return KEY_FORMAT_HINT
 
     def _set_active_nav_button(self, active_button: QPushButton):
         for btn in getattr(self, "_dashboard_nav_buttons", []):
