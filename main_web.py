@@ -3323,6 +3323,8 @@ class DashboardPage(QWidget):
         # Pagina Licenza (index 3)
         license_page = self._build_license_page()
         content_stacked.addWidget(license_page)
+        self._pages_stack = content_stacked
+        self._license_page_idx = 3
 
         content = content_stacked
 
@@ -3420,8 +3422,23 @@ class DashboardPage(QWidget):
             QLabel[role="value"] { color: #e8f4ff; font-size: 13px; font-weight: 600; }
             QLabel[role="badge"] { background: rgba(22,120,100,0.25); border: 1px solid #17806a;
                 border-radius: 6px; color: #6ee7b7; font-size: 12px; font-weight: 700; padding: 3px 10px; }
+            QLabel[role="badge-warn"] { background: rgba(234,179,8,0.15); border: 1px solid rgba(234,179,8,0.5);
+                border-radius: 6px; color: #fbbf24; font-size: 12px; font-weight: 700; padding: 3px 10px; }
+            QLabel[role="badge-err"] { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.5);
+                border-radius: 6px; color: #f87171; font-size: 12px; font-weight: 700; padding: 3px 10px; }
+            QLineEdit { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 6px; color: #e8f4ff; padding: 7px 12px; font-size: 13px; font-family: monospace; }
+            QLineEdit:focus { border-color: #17806a; }
+            QPushButton[role="activate"] { background: #17806a; color: white; border: none;
+                border-radius: 6px; padding: 8px 20px; font-size: 13px; font-weight: 600; }
+            QPushButton[role="activate"]:hover { background: #1a9c82; }
+            QPushButton[role="secondary"] { background: rgba(255,255,255,0.06); color: #9eb0c8; border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 6px; padding: 6px 14px; font-size: 12px; }
+            QPushButton[role="secondary"]:hover { background: rgba(255,255,255,0.1); }
         """
-        from PyQt5.QtWidgets import QFormLayout, QGroupBox
+        from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLineEdit, QApplication
+        from license_manager import LicenseManager
+
         page = QWidget()
         page.setStyleSheet(_card_style)
         outer = QVBoxLayout(page)
@@ -3432,15 +3449,18 @@ class DashboardPage(QWidget):
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f1f6ff;")
         outer.addWidget(title)
 
+        lm = LicenseManager()
+        status = lm.check()
+
         def _val(text):
             lbl = QLabel(text)
             lbl.setProperty("role", "value")
             lbl.style().unpolish(lbl); lbl.style().polish(lbl)
             return lbl
 
-        def _badge(text):
+        def _badge(text, role="badge"):
             lbl = QLabel(text)
-            lbl.setProperty("role", "badge")
+            lbl.setProperty("role", role)
             lbl.style().unpolish(lbl); lbl.style().polish(lbl)
             lbl.setFixedHeight(26)
             return lbl
@@ -3450,31 +3470,97 @@ class DashboardPage(QWidget):
         form_lic = QFormLayout(grp_lic)
         form_lic.setSpacing(12)
         form_lic.setContentsMargins(12, 20, 12, 12)
-        form_lic.addRow(QLabel("Piano:"), _badge("✦ SVILUPPO"))
-        form_lic.addRow(QLabel("Valida fino a:"), _val("— (nessuna scadenza in modalità sviluppo)"))
-        form_lic.addRow(QLabel("Dispositivo:"), _val("Questo PC"))
-        form_lic.addRow(QLabel("Analisi cloud:"), _val("Attive (RunPod Serverless)"))
+
+        badge_role = "badge" if status.valid else "badge-err"
+        form_lic.addRow(QLabel("Piano:"), _badge(status.plan_label, badge_role))
+        form_lic.addRow(QLabel("Stato:"), _val(status.status_label))
+        form_lic.addRow(QLabel("Scadenza:"), _val(status.expires_label))
+
+        # Device ID + copia
+        device_row = QHBoxLayout()
+        lbl_device = QLabel(status.device_id)
+        lbl_device.setProperty("role", "value")
+        lbl_device.style().unpolish(lbl_device); lbl_device.style().polish(lbl_device)
+        lbl_device.setStyleSheet("font-family: monospace; font-size: 12px; color: #6ee7b7; letter-spacing: 1px;")
+        btn_copy = QPushButton("Copia")
+        btn_copy.setProperty("role", "secondary")
+        btn_copy.setFixedWidth(60)
+        btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(status.device_id))
+        device_row.addWidget(lbl_device)
+        device_row.addWidget(btn_copy)
+        device_row.addStretch()
+        form_lic.addRow(QLabel("Device ID:"), device_row)
+
+        if status.user_name:
+            form_lic.addRow(QLabel("Account:"), _val(status.user_name))
+
         outer.addWidget(grp_lic)
+
+        # ── Attivazione licenza (solo se non in dev mode e non attiva) ──
+        if not status.is_dev:
+            grp_act = QGroupBox("Attiva Licenza")
+            act_layout = QVBoxLayout(grp_act)
+            act_layout.setContentsMargins(12, 20, 12, 12)
+            act_layout.setSpacing(10)
+
+            lbl_hint = QLabel(f"Inserisci la tua chiave licenza (formato: {from_license_manager_KEY_FORMAT_HINT()})")
+            lbl_hint.setStyleSheet("color: #5a7090; font-size: 11px;")
+            act_layout.addWidget(lbl_hint)
+
+            key_row = QHBoxLayout()
+            key_input = QLineEdit()
+            key_input.setPlaceholderText("PRLT-XXXX-XXXX-XXXX-XXXX")
+            key_input.setMaxLength(24)
+
+            lbl_result = QLabel("")
+            lbl_result.setStyleSheet("font-size: 12px;")
+            lbl_result.setWordWrap(True)
+
+            btn_activate = QPushButton("Attiva")
+            btn_activate.setProperty("role", "activate")
+            btn_activate.setFixedWidth(80)
+
+            def _do_activate():
+                key = key_input.text().strip()
+                ok, msg = lm.activate(key)
+                if ok:
+                    lbl_result.setStyleSheet("color: #6ee7b7; font-size: 12px;")
+                    lbl_result.setText(f"✅ {msg}")
+                    # Ricostruisce la pagina per mostrare stato aggiornato
+                    QTimer.singleShot(1500, lambda: self._refresh_license_page())
+                else:
+                    lbl_result.setStyleSheet("color: #f87171; font-size: 12px;")
+                    lbl_result.setText(f"❌ {msg}")
+
+            btn_activate.clicked.connect(_do_activate)
+            key_input.returnPressed.connect(_do_activate)
+
+            key_row.addWidget(key_input)
+            key_row.addWidget(btn_activate)
+            act_layout.addLayout(key_row)
+            act_layout.addWidget(lbl_result)
+
+            if status.valid:
+                btn_deact = QPushButton("Disattiva licenza su questo PC")
+                btn_deact.setProperty("role", "secondary")
+                btn_deact.setStyleSheet("color: #f87171;")
+                def _do_deactivate():
+                    from PyQt5.QtWidgets import QMessageBox
+                    if QMessageBox.question(page, "Disattiva", "Rimuovere la licenza da questo PC?",
+                                            QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                        lm.deactivate()
+                        self._refresh_license_page()
+                btn_deact.clicked.connect(_do_deactivate)
+                act_layout.addWidget(btn_deact)
+
+            outer.addWidget(grp_act)
 
         # ── Funzionalità incluse ──
         grp_feat = QGroupBox("Funzionalità Incluse")
         feat_layout = QVBoxLayout(grp_feat)
         feat_layout.setContentsMargins(12, 20, 12, 12)
         feat_layout.setSpacing(6)
-        features = [
-            "✅  Analisi video automatica (YOLOX)",
-            "✅  Tracking giocatori e palla",
-            "✅  Lavagna tattica 2D",
-            "✅  Heatmap e pressing map",
-            "✅  Timeline eventi e clip",
-            "✅  Statistiche partita",
-            "✅  Database squadre e giocatori",
-            "✅  Analisi cloud (RunPod)",
-            "⏳  Fuorigioco automatico  (prossimamente)",
-            "⏳  AI Tactical Text Generator  (prossimamente)",
-            "⏳  Prelyt Mobile  (prossimamente)",
-        ]
-        for f in features:
+        for f in status.features:
             lbl = QLabel(f)
             lbl.setStyleSheet("color: #9eb0c8; font-size: 12px; padding: 2px 0;")
             feat_layout.addWidget(lbl)
@@ -3482,6 +3568,29 @@ class DashboardPage(QWidget):
 
         outer.addStretch()
         return page
+
+    def _refresh_license_page(self):
+        """Ricostruisce la pagina licenza dopo attivazione/disattivazione."""
+        from license_manager import LicenseManager
+        LicenseManager()._cached_status = None
+        # Trova e sostituisce la pagina licenza nello stack
+        stack = getattr(self, "_pages_stack", None)
+        if stack is None:
+            return
+        idx = getattr(self, "_license_page_idx", None)
+        if idx is None:
+            return
+        old = stack.widget(idx)
+        new_page = self._build_license_page()
+        stack.insertWidget(idx, new_page)
+        stack.setCurrentIndex(idx)
+        if old:
+            old.deleteLater()
+
+
+def from_license_manager_KEY_FORMAT_HINT():
+    from license_manager import KEY_FORMAT_HINT
+    return KEY_FORMAT_HINT
 
     def _set_active_nav_button(self, active_button: QPushButton):
         for btn in getattr(self, "_dashboard_nav_buttons", []):
