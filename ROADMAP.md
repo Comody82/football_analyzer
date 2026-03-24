@@ -627,6 +627,16 @@ Video raw 180°
 - [ ] **SLA monitoring**: traccia tempo medio analisi per rilevare degradi delle performance RunPod
 - [ ] **Status page pubblica**: pagina tipo "status.prelyt.com" che mostra se il servizio è operativo (verde/giallo/rosso)
 
+**⚠️ Decisione da prendere prima del lancio commerciale — Cold Start RunPod:**
+> Attualmente `Min workers = 0` → il container Docker si spegne dopo inattività → primo job del giorno aspetta 3-5 min (cold start). Non dipende dal numero di utenti: basta che ci sia stata inattività recente.
+>
+> Con più abbonati attivi: se un worker è già caldo (traffico recente) → gli altri utenti non aspettano. Ma se tutti gli utenti sono inattivi → cold start per il primo che manda un job.
+
+- [ ] **Valutare `Min workers = 1`** su RunPod prima del lancio: 1 worker sempre acceso → zero cold start per tutti gli utenti → esperienza fluida
+  - Costo aggiuntivo: ~€0.30-0.50/ora fisso (indipendente dal traffico)
+  - Vale la pena con abbonati paganti — da attivare quando si supera la fase beta
+- [ ] **Messaggio cold start in app**: quando job è `IN_QUEUE` da più di 30s → mostrare *"Avvio worker cloud in corso... (può richiedere 2-4 min alla prima analisi)"* per evitare che l'utente pensi sia bloccato
+
 ---
 
 ### 🔐 Sistema Login e Licenze
