@@ -630,12 +630,57 @@ Video raw 180°
 ---
 
 ### 🔐 Sistema Login e Licenze
-- [ ] **Desktop con login online**: installi → crei account → controllo periodico abbonamento
-- [ ] **Modalità offline intelligente**: se abbonamento valido, permetti uso offline 15-30 giorni con messaggio "Serve connessione entro X giorni"
-- [ ] **Device binding**: legare licenza a max 2 PC
-- [ ] **Refresh token automatico**
-- [ ] **Blacklist lato server**: poter disattivare utenti
-- [ ] **Check anti-manipolazione data di sistema**
+
+#### Lato Client (✅ già implementato in `license_manager.py`)
+- [x] **Device fingerprint**: SHA256 di hostname + MAC → Device ID univoco per PC
+- [x] **Attivazione con chiave**: formato `PRLT-XXXX-XXXX-XXXX-XXXX`
+- [x] **Modalità offline intelligente**: grace period 30gg — messaggio "Connettiti entro X giorni"
+- [x] **Device binding client**: Device ID inviato al server all'attivazione
+- [x] **Refresh token automatico**: check online ogni 24h in background (thread non bloccante)
+- [x] **Blacklist lato client**: il server può marcare una licenza come blacklisted → app bloccata
+- [x] **Check anti-manipolazione data di sistema**: se orologio torna indietro > 1h → segnalato
+- [x] **Modalità DEV**: env `PRELYT_DEV=1` o file `.dev_mode` → sempre valido senza chiave
+- [x] **Pagina Licenza UI**: stato reale, Device ID copiabile, form attivazione, disattivazione
+
+#### Lato Server (❌ da costruire — richiede `api.prelyt.com`)
+
+> **Quando costruirlo**: solo quando si è pronti per vendere. Per ora l'app gira in modalità DEV.
+
+**Architettura flusso completo:**
+```
+Utente paga su prelyt.com
+        ↓
+Stripe/LemonSqueezy → webhook al server
+        ↓
+Server genera chiave PRLT-XXXX → email all'utente
+        ↓
+Utente inserisce chiave nell'app
+        ↓
+App → POST /v1/license/activate → server valida → salva localmente
+        ↓
+Ogni 24h: app → POST /v1/license/check → conferma stato
+```
+
+**API endpoints da implementare:**
+- [ ] `POST /v1/license/activate` → `{license_key, device_id}` → `{valid, plan, expires_at, user_name}`
+- [ ] `POST /v1/license/check` → `{license_key, device_id}` → `{valid, blacklisted}`
+- [ ] `POST /v1/license/deactivate` → rimuove device_id dalla licenza (libera slot)
+
+**Device binding lato server:**
+- [ ] Ogni chiave supporta max 2 PC: `PRLT-XXXX → [device_id_A, device_id_B]`
+- [ ] Terzo PC → rifiutato con messaggio "Limite dispositivi raggiunto"
+- [ ] Deattivazione libera uno slot → permette attivazione su nuovo PC
+
+**Gestione piani e pagamenti:**
+- [ ] Integrazione **Stripe** o **LemonSqueezy** per raccogliere pagamenti
+- [ ] Webhook pagamento → genera chiave automaticamente → email all'utente
+- [ ] Piani: `FREE` (no cloud) · `PRO` (tutto) · `ELITE` (tutto + priorità RunPod)
+- [ ] Scadenza per piano annuale → reminder email 30gg prima
+
+**Stack consigliato:**
+- [ ] **FastAPI** (Python) su VPS leggero (€5-10/mese) — oppure Cloudflare Workers (serverless, gratuito fino a 100k req/giorno)
+- [ ] **Database**: SQLite (semplice) o Supabase (managed Postgres gratuito fino a 500MB)
+- [ ] **Email**: Resend o Mailgun (gratuito fino a 3k email/mese)
 
 ---
 
